@@ -16,44 +16,46 @@ import {
 import { useAuth } from "../contexts/AuthContext";
 
 // Catalog of bill denominations for MXN, USD, EUR
+// Paleta sutil uniforme: tonos oscuros con borde discreto, sin colores llamativos
 const DENOMINATIONS_CATALOG = {
   MXN: [
-    { value: 1000, color: "bg-purple-950/40 border-purple-500 text-purple-300", label: "Mil Pesos", badge: "G. Cárdenas" },
-    { value: 500, color: "bg-blue-950/40 border-blue-500 text-blue-300", label: "Quinientos Pesos", badge: "B. Juárez" },
-    { value: 200, color: "bg-emerald-950/40 border-emerald-500 text-emerald-300", label: "Doscientos Pesos", badge: "Sor Juana" },
-    { value: 100, color: "bg-rose-950/40 border-rose-500 text-rose-300", label: "Cien Pesos", badge: "Nezahualcóyotl" },
-    { value: 50, color: "bg-pink-950/40 border-pink-500 text-pink-300", label: "Cincuenta Pesos", badge: "José M. Morelos" },
-    { value: 20, color: "bg-cyan-950/40 border-cyan-500 text-cyan-300", label: "Veinte Pesos", badge: "B. Juárez (Azul)" },
-    { value: 10, color: "bg-amber-950/20 border-amber-600/40 text-amber-200", label: "Moneda de $10", isCoin: true },
-    { value: 5, color: "bg-amber-950/20 border-amber-600/40 text-amber-200", label: "Moneda de $5", isCoin: true },
-    { value: 2, color: "bg-amber-950/20 border-amber-600/40 text-amber-200", label: "Moneda de $2", isCoin: true },
-    { value: 1, color: "bg-amber-950/20 border-amber-600/40 text-amber-200", label: "Moneda de $1", isCoin: true }
+    { value: 1000, color: "bg-[#1e2329] border-[#3a3f47] text-gray-200", label: "Mil Pesos", badge: "G. Cárdenas" },
+    { value: 500, color: "bg-[#1e2329] border-[#3a3f47] text-gray-200", label: "Quinientos Pesos", badge: "B. Juárez" },
+    { value: 200, color: "bg-[#1e2329] border-[#3a3f47] text-gray-200", label: "Doscientos Pesos", badge: "Sor Juana" },
+    { value: 100, color: "bg-[#1e2329] border-[#3a3f47] text-gray-200", label: "Cien Pesos", badge: "Nezahualcóyotl" },
+    { value: 50, color: "bg-[#1e2329] border-[#3a3f47] text-gray-200", label: "Cincuenta Pesos", badge: "J. M. Morelos" },
+    { value: 20, color: "bg-[#1e2329] border-[#3a3f47] text-gray-200", label: "Veinte Pesos", badge: "B. Juárez" },
+    { value: 10, color: "bg-[#181a20] border-[#2b3139] text-gray-400", label: "Moneda de $10", isCoin: true },
+    { value: 5, color: "bg-[#181a20] border-[#2b3139] text-gray-400", label: "Moneda de $5", isCoin: true },
+    { value: 2, color: "bg-[#181a20] border-[#2b3139] text-gray-400", label: "Moneda de $2", isCoin: true },
+    { value: 1, color: "bg-[#181a20] border-[#2b3139] text-gray-400", label: "Moneda de $1", isCoin: true }
   ],
   USD: [
-    { value: 100, color: "bg-green-950/40 border-green-500 text-green-300", label: "One Hundred", badge: "B. Franklin" },
-    { value: 50, color: "bg-green-950/30 border-green-600 text-green-400", label: "Fifty Dollars", badge: "U. S. Grant" },
-    { value: 20, color: "bg-green-950/30 border-green-600 text-green-400", label: "Twenty Dollars", badge: "A. Jackson" },
-    { value: 10, color: "bg-green-950/30 border-green-600 text-green-400", label: "Ten Dollars", badge: "A. Hamilton" },
-    { value: 5, color: "bg-green-950/30 border-green-600 text-green-400", label: "Five Dollars", badge: "A. Lincoln" },
-    { value: 2, color: "bg-green-950/30 border-green-600 text-green-400", label: "Two Dollars", badge: "T. Jefferson" },
-    { value: 1, color: "bg-green-950/30 border-green-600 text-green-400", label: "One Dollar", badge: "G. Washington" }
+    { value: 100, color: "bg-[#1e2329] border-[#3a3f47] text-gray-200", label: "One Hundred", badge: "B. Franklin" },
+    { value: 50, color: "bg-[#1e2329] border-[#3a3f47] text-gray-200", label: "Fifty Dollars", badge: "U. S. Grant" },
+    { value: 20, color: "bg-[#1e2329] border-[#3a3f47] text-gray-200", label: "Twenty Dollars", badge: "A. Jackson" },
+    { value: 10, color: "bg-[#1e2329] border-[#3a3f47] text-gray-200", label: "Ten Dollars", badge: "A. Hamilton" },
+    { value: 5, color: "bg-[#1e2329] border-[#3a3f47] text-gray-200", label: "Five Dollars", badge: "A. Lincoln" },
+    { value: 2, color: "bg-[#1e2329] border-[#3a3f47] text-gray-200", label: "Two Dollars", badge: "T. Jefferson" },
+    { value: 1, color: "bg-[#181a20] border-[#2b3139] text-gray-400", label: "One Dollar", badge: "G. Washington", isCoin: true }
   ],
   EUR: [
-    { value: 500, color: "bg-indigo-950/40 border-indigo-500 text-indigo-300", label: "Five Hundred Euro", badge: "Modern Arch" },
-    { value: 200, color: "bg-amber-950/40 border-amber-500 text-amber-300", label: "Two Hundred Euro", badge: "Art Nouveau" },
-    { value: 100, color: "bg-emerald-950/40 border-emerald-500 text-emerald-300", label: "One Hundred Euro", badge: "Baroque" },
-    { value: 50, color: "bg-orange-950/40 border-orange-500 text-orange-300", label: "Fifty Euro", badge: "Renaissance" },
-    { value: 20, color: "bg-blue-950/40 border-blue-500 text-blue-300", label: "Twenty Euro", badge: "Gothic" },
-    { value: 10, color: "bg-red-950/40 border-red-500 text-red-300", label: "Ten Euro", badge: "Romanesque" },
-    { value: 5, color: "bg-slate-850 border-slate-500 text-slate-300", label: "Five Euro", badge: "Classical" }
+    { value: 500, color: "bg-[#1e2329] border-[#3a3f47] text-gray-200", label: "Five Hundred Euro", badge: "Modern Arch" },
+    { value: 200, color: "bg-[#1e2329] border-[#3a3f47] text-gray-200", label: "Two Hundred Euro", badge: "Art Nouveau" },
+    { value: 100, color: "bg-[#1e2329] border-[#3a3f47] text-gray-200", label: "One Hundred Euro", badge: "Baroque" },
+    { value: 50, color: "bg-[#1e2329] border-[#3a3f47] text-gray-200", label: "Fifty Euro", badge: "Renaissance" },
+    { value: 20, color: "bg-[#1e2329] border-[#3a3f47] text-gray-200", label: "Twenty Euro", badge: "Gothic" },
+    { value: 10, color: "bg-[#1e2329] border-[#3a3f47] text-gray-200", label: "Ten Euro", badge: "Romanesque" },
+    { value: 5, color: "bg-[#181a20] border-[#2b3139] text-gray-400", label: "Five Euro", badge: "Classical" }
   ]
 };
 
 interface ShiftOpeningCountProps {
+  token: string;
   onShiftStatusChange: (status: string | null, activeShift: any | null) => void;
 }
 
-export default function ShiftOpeningCount({ onShiftStatusChange }: ShiftOpeningCountProps) {
+export default function ShiftOpeningCount({ token, onShiftStatusChange }: ShiftOpeningCountProps) {
   const { profile } = useAuth();
   const [activeShift, setActiveShift] = useState<any>(null);
   const [status, setStatus] = useState<"LOADING" | "CLOSED" | "PENDING_AUTHORIZATION" | "OPEN">("LOADING");
@@ -74,9 +76,11 @@ export default function ShiftOpeningCount({ onShiftStatusChange }: ShiftOpeningC
   const fetchShiftStatus = async () => {
     try {
       setStatus("LOADING");
-      const userId = localStorage.getItem("mock_user_id") || "user_cajero_1";
       const res = await fetch("/api/shifts/status", {
-        headers: { "x-user-id": userId }
+        headers: { 
+          "Authorization": `Bearer ${token}`,
+          "Content-Type": "application/json"
+        }
       });
       if (res.ok) {
         const data = await res.json();
@@ -89,9 +93,15 @@ export default function ShiftOpeningCount({ onShiftStatusChange }: ShiftOpeningC
           setStatus("CLOSED");
           onShiftStatusChange(null, null);
         }
+      } else {
+        console.error(`Error ${res.status}: ${res.statusText}`);
+        setStatus("CLOSED");
+        onShiftStatusChange(null, null);
       }
     } catch (e) {
       console.error("Error fetching shift status", e);
+      setStatus("CLOSED");
+      onShiftStatusChange(null, null);
     }
   };
 
@@ -134,12 +144,11 @@ export default function ShiftOpeningCount({ onShiftStatusChange }: ShiftOpeningC
   const handleOpenShiftSubmit = async () => {
     setSubmitting(true);
     try {
-      const userId = localStorage.getItem("mock_user_id") || "user_cajero_1";
       const res = await fetch("/api/shifts/open", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "x-user-id": userId
+          "Authorization": `Bearer ${token}`
         },
         body: JSON.stringify({ counts })
       });
@@ -152,7 +161,7 @@ export default function ShiftOpeningCount({ onShiftStatusChange }: ShiftOpeningC
         // ShiftGate handles the transition — no reload needed
       } else {
         const err = await res.json();
-        alert("Error al abrir turno: " + (err.error || "Error del servidor"));
+        alert("Error al abrir turno: " + (err.error || `Error ${res.status}: ${res.statusText}`));
       }
     } catch (e) {
       console.error(e);
@@ -168,13 +177,11 @@ export default function ShiftOpeningCount({ onShiftStatusChange }: ShiftOpeningC
     setAuthError("");
     setAuthSuccess("");
     try {
-      // Use gerente level 4 to authorize
-      const managerId = "user_gerente_1"; 
       const res = await fetch("/api/shifts/authorize", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "x-user-id": managerId
+          "Authorization": `Bearer ${token}`
         },
         body: JSON.stringify({ shift_id: activeShift.id })
       });
@@ -187,7 +194,7 @@ export default function ShiftOpeningCount({ onShiftStatusChange }: ShiftOpeningC
         }, 2000);
       } else {
         const err = await res.json();
-        setAuthError(err.error || "No se pudo autorizar el turno.");
+        setAuthError(err.error || `No se pudo autorizar el turno (${res.status}).`);
       }
     } catch (e) {
       setAuthError("Error de comunicación con el servidor.");

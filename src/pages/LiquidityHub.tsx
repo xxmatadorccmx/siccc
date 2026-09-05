@@ -98,8 +98,10 @@ export default function LiquidityHub() {
   const [error, setError] = useState<string | null>(null);
   const [isRealTime, setIsRealTime] = useState(false);
 
-  const { profile, switchUser } = useAuth();
+  const { profile } = useAuth();
   const [cajeros, setCajeros] = useState<any[]>([]);
+  const [sucursales, setSucursales] = useState<any[]>([]);
+  const [selectedSucursalId, setSelectedSucursalId] = useState("");
   
   // New Liquidity / Dotation states
   const [showDotationModal, setShowDotationModal] = useState(false);
@@ -127,7 +129,7 @@ export default function LiquidityHub() {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  // Fetch list of active cashiers for dropdown
+  // Fetch list of active cashiers + sucursales for dropdown
   useEffect(() => {
     fetch("/api/liquidity/cajeros")
       .then((res) => res.json())
@@ -140,7 +142,22 @@ export default function LiquidityHub() {
         }
       })
       .catch((err) => console.error("Error loading cajeros:", err));
+
+    fetch("/api/sucursales")
+      .then((res) => res.json())
+      .then((json) => {
+        if (json.status === "success" && Array.isArray(json.data)) {
+          setSucursales(json.data);
+          if (json.data.length > 0) {
+            setSelectedSucursalId(json.data[0].sucursal_id);
+          }
+        }
+      })
+      .catch((err) => console.error("Error loading sucursales:", err));
   }, []);
+
+  // Cajeros filtrados por la sucursal seleccionada
+  const cajerosDeSucursal = cajeros.filter(c => c.branch_id === selectedSucursalId);
   
   // Selection states
   const [selectedNode, setSelectedNode] = useState<NodeItem | null>(null);
@@ -512,12 +529,14 @@ export default function LiquidityHub() {
   const pendingActions = data?.pending_actions || [];
   const totalValueMXN = data?.totalValueMXN || 0;
 
-  // Pie colors matching currency themes
+  // Pie colors matching currency themes — paleta del sistema
   const COLORS: Record<string, string> = {
-    USD: "#3b82f6",  // Blue
+    USD: "#F0B90B",  // Binance Yellow
     EUR: "#8b5cf6",  // Purple
     USDT: "#10b981", // Emerald
-    MXN: "#f59e0b"  // Amber
+    MXN: "#f59e0b",  // Amber
+    GBP: "#ef4444",  // Red
+    CAD: "#06b6d4"   // Cyan
   };
 
   // Prepare Recharts Donut Data
@@ -844,7 +863,7 @@ export default function LiquidityHub() {
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
               <div>
                 <h2 className="text-lg font-bold flex items-center gap-2 text-white">
-                  <ShieldCheck className="text-blue-500" size={20} />
+                  <ShieldCheck className="text-binance-yellow" size={20} />
                   Panel de Control de Saldos de Cajeros
                 </h2>
                 <p className="text-xs text-gray-400 mt-0.5">Control de existencias operativas y alertas de excedente</p>
@@ -858,7 +877,7 @@ export default function LiquidityHub() {
                     setDotationType("APERTURA");
                     setShowDotationModal(true);
                   }}
-                  className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer"
+                  className="px-3 py-1.5 bg-binance-yellow hover:bg-yellow-500 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer"
                 >
                   <Send size={13} /> Dotar Caja
                 </button>
@@ -891,16 +910,8 @@ export default function LiquidityHub() {
               
               {/* Profile tester helper */}
               <div className="flex items-center gap-2 self-stretch sm:self-auto justify-end">
-                <span className="text-gray-500 text-[10px] uppercase font-mono">Simulador RLS:</span>
-                <select
-                  value={profile?.auth_user_id || "user_cajero_1"}
-                  onChange={(e) => switchUser(e.target.value)}
-                  className="bg-[#0d1117] border border-[#21262d] text-gray-300 text-xs rounded px-2 py-1 focus:outline-none focus:border-[#f0b90b]"
-                >
-                  <option value="user_cajero_1">Cajero Polanco (Nivel 2)</option>
-                  <option value="user_gerente_1">Gerente General (Nivel 4)</option>
-                  <option value="user_admin">Administrador Global (Nivel 5)</option>
-                </select>
+                <span className="text-gray-500 text-[10px] uppercase font-mono">Operador:</span>
+                <span className="text-gray-300 text-xs font-mono">{profile?.auth_user_id || '—'}</span>
               </div>
             </div>
 
@@ -932,7 +943,7 @@ export default function LiquidityHub() {
                         <div>
                           <div className="flex items-center gap-2">
                             <span className="font-bold text-sm text-white">{caja.nickname}</span>
-                            <span className="text-[10px] bg-blue-500/10 text-blue-400 px-2 py-0.5 rounded-full border border-blue-500/20 uppercase font-bold">
+                            <span className="text-[10px] bg-binance-yellow/10 text-binance-yellow px-2 py-0.5 rounded-full border border-binance-yellow/20 uppercase font-bold">
                               {caja.branch_name || "Bóveda"}
                             </span>
                           </div>
@@ -968,7 +979,7 @@ export default function LiquidityHub() {
                             setDotationType("APERTURA");
                             setShowDotationModal(true);
                           }}
-                          className="px-2.5 py-1.5 bg-blue-600/10 hover:bg-blue-600/20 text-blue-400 border border-blue-500/20 hover:border-blue-500/40 rounded-lg text-xs font-bold transition-all cursor-pointer"
+                          className="px-2.5 py-1.5 bg-binance-yellow/10 hover:bg-binance-yellow/20 text-binance-yellow border border-binance-yellow/20 hover:border-binance-yellow/40 rounded-lg text-xs font-bold transition-all cursor-pointer"
                         >
                           Dotar
                         </button>
@@ -1028,16 +1039,16 @@ export default function LiquidityHub() {
                     </div>
                     <div className="border-t border-[#21262d] pt-2 mt-1 flex justify-end">
                       {authorizingDotId === dot.id ? (
-                        <div className="flex items-center gap-2 text-blue-400">
+                        <div className="flex items-center gap-2 text-binance-yellow">
                           <span className="animate-pulse">Autorizando con biometría...</span>
                           <div className="w-20 h-1.5 bg-[#161b22] rounded-full overflow-hidden">
-                            <div className="h-full bg-blue-500 transition-all duration-150" style={{ width: `${authScanProgress}%` }} />
+                            <div className="h-full bg-binance-yellow transition-all duration-150" style={{ width: `${authScanProgress}%` }} />
                           </div>
                         </div>
                       ) : (
                         <button
                           onClick={() => handleAuthorizeDotation(dot.id)}
-                          className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-[10px] font-bold flex items-center gap-1.5 cursor-pointer transition-all"
+                          className="px-4 py-1.5 bg-binance-yellow hover:bg-yellow-500 text-white rounded-lg text-[10px] font-bold flex items-center gap-1.5 cursor-pointer transition-all"
                         >
                           <Fingerprint size={12} /> Autorizar con Biométrica
                         </button>
@@ -1077,7 +1088,7 @@ export default function LiquidityHub() {
                           isWithdrawal
                             ? "bg-amber-500/10 text-amber-500 border-amber-500/20"
                             : dot.tipo_dotacion === "APERTURA"
-                            ? "bg-blue-500/10 text-blue-400 border-blue-500/20"
+                            ? "bg-binance-yellow/10 text-binance-yellow border-binance-yellow/20"
                             : "bg-red-500/10 text-red-400 border-red-500/20"
                         }`}>
                           {isWithdrawal ? "Retiro" : dot.tipo_dotacion}
@@ -1102,7 +1113,7 @@ export default function LiquidityHub() {
                       <div className="text-[10px] text-gray-400 font-mono flex flex-col gap-0.5">
                         {dot.folio_boveda && <div>Folio Bóveda: {dot.folio_boveda}</div>}
                         {dot.clave_autorizacion && dot.clave_autorizacion !== "WITHDRAWN" && (
-                          <div>Clave: <strong className="text-blue-400 select-all">{dot.clave_autorizacion}</strong></div>
+                          <div>Clave: <strong className="text-binance-yellow select-all">{dot.clave_autorizacion}</strong></div>
                         )}
                         <div className="text-gray-500">{new Date(dot.created_at).toLocaleString()}</div>
                       </div>
@@ -1110,16 +1121,16 @@ export default function LiquidityHub() {
                       <div className="border-t border-[#21262d] pt-2 mt-1 flex justify-end gap-2">
                         {dot.estatus === "PENDIENTE" && !dot.gerente_id ? (
                           authorizingDotId === dot.id ? (
-                            <div className="flex items-center gap-2 text-blue-400">
+                            <div className="flex items-center gap-2 text-binance-yellow">
                               <span className="animate-pulse text-[10px]">Autorizando con biometría...</span>
                               <div className="w-20 h-1.5 bg-[#161b22] rounded-full overflow-hidden">
-                                <div className="h-full bg-blue-500 transition-all duration-150" style={{ width: `${authScanProgress}%` }} />
+                                <div className="h-full bg-binance-yellow transition-all duration-150" style={{ width: `${authScanProgress}%` }} />
                               </div>
                             </div>
                           ) : (
                             <button
                               onClick={() => handleAuthorizeDotation(dot.id)}
-                              className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-[10px] font-bold flex items-center gap-1.5 cursor-pointer transition-all"
+                              className="px-4 py-1.5 bg-binance-yellow hover:bg-yellow-500 text-white rounded-lg text-[10px] font-bold flex items-center gap-1.5 cursor-pointer transition-all"
                             >
                               <Fingerprint size={12} /> Autorizar con Biométrica
                             </button>
@@ -1436,9 +1447,9 @@ export default function LiquidityHub() {
               exit={{ opacity: 0, scale: 0.95, y: 15 }}
               className="relative w-full max-w-lg bg-[#0d1117] rounded-2xl border border-[#21262d] overflow-hidden shadow-2xl z-10 animate-fade-in"
             >
-              <div className="p-6 border-b border-[#21262d] flex items-center justify-between bg-gradient-to-r from-blue-500/5 to-transparent">
+              <div className="p-6 border-b border-[#21262d] flex items-center justify-between bg-gradient-to-r from-binance-yellow/5 to-transparent">
                 <div>
-                  <div className="text-[10px] font-bold text-blue-400 uppercase tracking-wider flex items-center gap-1">
+                  <div className="text-[10px] font-bold text-binance-yellow uppercase tracking-wider flex items-center gap-1">
                     <Send size={12} />
                     Asignación de Liquidez Operativa
                   </div>
@@ -1467,18 +1478,48 @@ export default function LiquidityHub() {
                   </div>
                 )}
 
-                {/* Cashier selection */}
+                {/* Sucursal selection */}
+                <div>
+                  <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5">Sucursal Destino</label>
+                  <select
+                    value={selectedSucursalId}
+                    onChange={(e) => {
+                      setSelectedSucursalId(e.target.value);
+                      // Reset cajero al cambiar sucursal
+                      const cajerosDeNueva = cajeros.filter(c => c.branch_id === e.target.value);
+                      setSelectedCajeroId(cajerosDeNueva.length > 0 ? cajerosDeNueva[0].id : "");
+                    }}
+                    className="w-full text-xs bg-[#161b22] border border-[#21262d] rounded-xl px-3.5 py-2.5 text-white focus:outline-none focus:border-binance-yellow/50"
+                  >
+                    {sucursales.map(s => (
+                      <option key={s.sucursal_id} value={s.sucursal_id}>
+                        {s.nombre}{s.es_matriz === 1 ? " (Matriz)" : ""}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Cashier selection (filtrado por sucursal) */}
                 <div>
                   <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5">Operador / Cajero Destino</label>
                   <select
                     value={selectedCajeroId}
                     onChange={(e) => setSelectedCajeroId(e.target.value)}
-                    className="w-full text-xs bg-[#161b22] border border-[#21262d] rounded-xl px-3.5 py-2.5 text-white focus:outline-none focus:border-blue-500"
+                    className="w-full text-xs bg-[#161b22] border border-[#21262d] rounded-xl px-3.5 py-2.5 text-white focus:outline-none focus:border-binance-yellow/50"
                   >
-                    {cajeros.map(c => (
-                      <option key={c.id} value={c.id}>{c.nickname} ({c.puesto} - Sucursal: {c.branch_id})</option>
-                    ))}
+                    {cajerosDeSucursal.length > 0 ? (
+                      cajerosDeSucursal.map(c => (
+                        <option key={c.id} value={c.id}>{c.nickname} ({c.puesto})</option>
+                      ))
+                    ) : (
+                      <option value="">Sin cajeros activos en esta sucursal</option>
+                    )}
                   </select>
+                  {cajerosDeSucursal.length === 0 && (
+                    <p className="text-[10px] text-binance-yellow mt-1">
+                      ⚠️ No hay cajeros activos en esta sucursal. Asigne un cajero desde Configuración.
+                    </p>
+                  )}
                 </div>
 
                 {/* Dotation Type Tabs */}
@@ -1493,7 +1534,7 @@ export default function LiquidityHub() {
                         setErrorMessage(null);
                       }}
                       className={`py-2 text-xs font-bold rounded-lg transition-all ${
-                        dotationType === "APERTURA" ? "bg-blue-600 text-white" : "text-gray-400 hover:text-white"
+                        dotationType === "APERTURA" ? "bg-binance-yellow text-white" : "text-gray-400 hover:text-white"
                       }`}
                     >
                       Apertura (Física)
@@ -1505,7 +1546,7 @@ export default function LiquidityHub() {
                         setErrorMessage(null);
                       }}
                       className={`py-2 text-xs font-bold rounded-lg transition-all ${
-                        dotationType === "EMERGENCIA" ? "bg-blue-600 text-white" : "text-gray-400 hover:text-white"
+                        dotationType === "EMERGENCIA" ? "bg-binance-yellow text-white" : "text-gray-400 hover:text-white"
                       }`}
                     >
                       Emergencia (Remota)
@@ -1523,7 +1564,7 @@ export default function LiquidityHub() {
                       placeholder="0.00"
                       value={dotationAmount}
                       onChange={(e) => setDotationAmount(e.target.value)}
-                      className="w-full text-xs bg-[#161b22] border border-[#21262d] rounded-xl pl-8 pr-12 py-2.5 text-white focus:outline-none focus:border-blue-500 font-mono"
+                      className="w-full text-xs bg-[#161b22] border border-[#21262d] rounded-xl pl-8 pr-12 py-2.5 text-white focus:outline-none focus:border-binance-yellow/50 font-mono"
                     />
                     <span className="absolute right-3.5 top-2.5 text-gray-500 font-bold text-[10px] uppercase font-mono">MXN</span>
                   </div>
@@ -1547,8 +1588,8 @@ export default function LiquidityHub() {
                     </p>
                   </div>
                 ) : (
-                  <div className="bg-[#1e242c]/50 p-4 rounded-xl border border-blue-500/20 space-y-3">
-                    <span className="text-[10px] font-bold text-blue-400 uppercase tracking-wider block">
+                  <div className="bg-[#1e242c]/50 p-4 rounded-xl border border-binance-yellow/20 space-y-3">
+                    <span className="text-[10px] font-bold text-binance-yellow uppercase tracking-wider block">
                       Autorización Remota por Biometría (WebAuthn)
                     </span>
                     <p className="text-[11px] text-gray-400 leading-relaxed">
@@ -1556,9 +1597,9 @@ export default function LiquidityHub() {
                     </p>
 
                     {simulatedAuthCode ? (
-                      <div className="p-3 bg-blue-500/10 border border-blue-500/20 rounded-xl text-center space-y-1">
+                      <div className="p-3 bg-binance-yellow/10 border border-binance-yellow/20 rounded-xl text-center space-y-1">
                         <span className="text-[10px] text-gray-500 uppercase font-bold block">Clave de Desbloqueo Generada</span>
-                        <span className="text-xl font-extrabold text-blue-400 tracking-wider font-mono select-all">
+                        <span className="text-xl font-extrabold text-binance-yellow tracking-wider font-mono select-all">
                           {simulatedAuthCode}
                         </span>
                         <span className="text-[10px] text-gray-400 block mt-1">
@@ -1567,12 +1608,12 @@ export default function LiquidityHub() {
                       </div>
                     ) : remoteAuthScanning ? (
                       <div className="space-y-2 py-2">
-                        <div className="flex justify-between text-[11px] text-blue-400 font-mono">
+                        <div className="flex justify-between text-[11px] text-binance-yellow font-mono">
                           <span className="animate-pulse">ESCANEO CRIPTOGRÁFICO WEBAUTHN...</span>
                           <span>{scanProgress}%</span>
                         </div>
                         <div className="h-1 bg-[#161b22] rounded-full overflow-hidden">
-                          <div className="h-full bg-blue-500 transition-all duration-150" style={{ width: `${scanProgress}%` }} />
+                          <div className="h-full bg-binance-yellow transition-all duration-150" style={{ width: `${scanProgress}%` }} />
                         </div>
                       </div>
                     ) : (
@@ -1586,7 +1627,7 @@ export default function LiquidityHub() {
                           setErrorMessage(null);
                           setRemoteAuthScanning(true);
                         }}
-                        className="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                        className="w-full py-2 bg-binance-yellow hover:bg-yellow-500 text-white rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer"
                       >
                         <Fingerprint size={14} /> Autorizar con Biométrica (WebAuthn)
                       </button>
@@ -1599,7 +1640,7 @@ export default function LiquidityHub() {
                   <div className="pt-2">
                     <button
                       type="submit"
-                      className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer"
+                      className="w-full py-2.5 bg-binance-yellow hover:bg-yellow-500 text-white rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer"
                     >
                       <CheckCircle2 size={15} /> Aplicar Dotación de Apertura
                     </button>

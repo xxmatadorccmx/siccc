@@ -5,8 +5,28 @@ import multer from "multer";
 import path from "path";
 import fs from "fs";
 import { createHash } from "crypto";
+import helmet from 'helmet';
+
+import { authenticateToken, requireRole, AuthenticatedRequest, hashPassword } from './src/middleware/auth';
+import { generalRateLimit, loginRateLimit, accountLockout } from './src/middleware/security';
+import { login, getProfile, changePassword, logout, loginValidation, passwordChangeValidation } from './src/controllers/auth';
+
 import clearingRoutes from "./src/microservices/clearing-house/routes/clearing.ts";
 import db from "./src/db/database.ts";
+
+// --- MOTOR DE CUMPLIMIENTO INDEPENDIENTE (Fase 4) ---
+import {
+  buscarEnListas,
+  requisitosCapturaPorMonto,
+  validarCandadoCaptura,
+} from './src/compliance/complianceService.ts';
+import { generarFormatoDesviacionPDF } from './src/compliance/desviacionPdf.ts';
+import { generarReporteRip, reporteRipACsv } from './src/compliance/ripReporter.ts';
+
+// --- MOTOR PEPS/FIFO extraído (Fase 5) — testable de forma aislada ---
+import { ejecutarFIFO, calcularFIFO } from './src/db/fifo.ts';
+
+
 
 // 🩹 MIGRATION: Fix the trigger that was created with wrong column name 'created_at' instead of 'date'
 try {
@@ -76,11 +96,25 @@ const upload = multer({ storage: storage });
 console.log("Server.ts starting up...");
 dotenv.config();
 
-async function startServer() {
+export async function createApp() {
   const app = express();
-  const PORT = 3000;
 
-  app.use(express.json());
+  // Middlewares de seguridad
+  app.use(helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"], // Needed for Vite dev
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        imgSrc: ["'self'", "data:", "https:"],
+        connectSrc: ["'self'", "ws:", "wss:"],
+      },
+    },
+    crossOriginEmbedderPolicy: false, // Needed for Vite
+  }));
+  
+  app.use(generalRateLimit);
+  app.use(express.json({ limit: '10mb' }));
 
   // --- API Gateway / Microservices Routes ---
   
@@ -109,16 +143,22 @@ async function startServer() {
 
   // Mock ODBC Adapter for SOFTExchange (MySQL 5.1)
   app.get("/api/legacy/balances", (req, res) => {
-    // Simulated ODBC connection to Visual FoxPro / MySQL 5.1 legacy system
-    res.json({
-      status: "success",
-      source: "SOFTExchange Legacy",
-      data: [
-        { currency: "USD", balance: 150000.00, rate: 17.05 },
-        { currency: "EUR", balance: 45000.00, rate: 18.50 },
-        { currency: "MXN", balance: 2500000.00, rate: 1.00 }
-      ]
-    });
+    // Saldos reales desde SQLite — devuelve 0 en primera sesión
+    try {
+      const boveda = db.prepare('SELECT currency, balance FROM Boveda').all() as any[];
+      const balances = boveda.map(b => ({
+        currency: b.currency,
+        balance: b.balance || 0,
+        rate: redisRates[`${b.currency}_MXN`]?.buy || 1
+      }));
+      res.json({
+        status: "success",
+        source: "SQLite Local",
+        data: balances
+      });
+    } catch (e) {
+      res.json({ status: "success", source: "SQLite Local", data: [] });
+    }
   });
 
   // Real-Time Rates Endpoint (Consumes Redis Cache)
@@ -160,10 +200,24 @@ async function startServer() {
   const getTransactions = (req, res) => {
     try {
       const transactions = db.prepare(`
-        SELECT id, 'IN' as type, currency_in as currency, amount_in as amount, method_in as method, status, created_at as date, client_name as client
+        SELECT id, 'IN' as type,
+               currency_in, amount_in, method_in,
+               currency_out, amount_out, method_out,
+               rate, markup,
+               status, settlement_status, branch_id, customer_id,
+               client_name as client, created_at as date,
+               transfer_bank_name, transfer_account_number, transfer_payer_name,
+               transfer_date, transfer_tracking_id, transfer_txid
         FROM Operaciones_Captacion
         UNION ALL
-        SELECT id, 'OUT' as type, currency_out as currency, amount_out as amount, method_out as method, status, created_at as date, client_name as client
+        SELECT id, 'OUT' as type,
+               currency_in, amount_in, method_in,
+               currency_out, amount_out, method_out,
+               rate, markup,
+               status, settlement_status, branch_id, customer_id,
+               client_name as client, created_at as date,
+               transfer_bank_name, transfer_account_number, transfer_payer_name,
+               transfer_date, transfer_tracking_id, transfer_txid
         FROM Operaciones_Liquidacion_P2P
         ORDER BY date DESC
         LIMIT 50
@@ -555,55 +609,24 @@ async function startServer() {
     }
   });
 
-// --- Endpoints de Auth & Perfiles (RBAC) ---
-  app.get('/api/auth/profile', (req, res) => {
-    const userId = req.headers['x-user-id'] || 'user_cajero_1'; // Mock Auth para desarrollo
-    try {
-      const profile = db.prepare('SELECT * FROM User_Profiles WHERE auth_user_id = ?').get(userId) as any;
-      if (!profile) return res.status(404).json({ error: 'Perfil no encontrado' });
-      
-      // Parsear los permisos JSONB
-      profile.custom_permissions = JSON.parse(profile.custom_permissions || '{}');
-      res.json(profile);
-    } catch (error) {
-      res.status(500).json({ error: (error as Error).message });
-    }
-  });
+  // ═══════════════════════════════════════════
+  // 🔒 AUTENTICACIÓN SEGURA - JWT + BCRYPT
+  // ═══════════════════════════════════════════
+  
+  // Login con rate limiting y bloqueo de cuentas
+  app.post('/api/auth/login', loginRateLimit, accountLockout, loginValidation, login);
+  
+  // Perfil del usuario autenticado
+  app.get('/api/auth/profile', authenticateToken, getProfile);
+  
+  // Cambio de contraseña
+  app.patch('/api/auth/password', authenticateToken, passwordChangeValidation, changePassword);
+  
+  // Logout
+  app.post('/api/auth/logout', authenticateToken, logout);
 
-  app.post('/api/auth/login', (req, res) => {
-    const { auth_user_id, password } = req.body;
-    if (!auth_user_id || !password) {
-      return res.status(400).json({ status: "error", message: "Usuario y contraseña requeridos." });
-    }
-    try {
-      const hash = createHash('sha256').update(password).digest('hex');
-      
-      const profile = db.prepare(
-        'SELECT * FROM User_Profiles WHERE auth_user_id = ? AND password_hash = ? AND is_active = 1'
-      ).get(auth_user_id, hash) as any;
-      
-      if (!profile) {
-        return res.status(401).json({ status: "error", message: "Credenciales inválidas." });
-      }
-
-      // Update last_login
-      db.prepare('UPDATE User_Profiles SET last_login = CURRENT_TIMESTAMP WHERE auth_user_id = ?').run(auth_user_id);
-
-      // Parse permissions
-      profile.custom_permissions = JSON.parse(profile.custom_permissions || '{}');
-
-      res.json({ 
-        status: "success", 
-        message: "Inicio de sesión exitoso.",
-        data: profile
-      });
-    } catch (error) {
-      res.status(500).json({ error: (error as Error).message });
-    }
-  });
-
-  app.post('/api/auth/users', (req, res) => {
-    const { nickname, puesto, branch_id, hire_date, role_level } = req.body;
+  app.post('/api/auth/users', async (req, res) => {
+    const { nickname, puesto, branch_id, hire_date, role_level, password } = req.body;
     try {
       const authUserId = `user_${nickname.toLowerCase().replace(/\s+/g, '_')}_${Date.now()}`;
       const defaultPermissions = JSON.stringify({
@@ -612,20 +635,128 @@ async function startServer() {
         show_vault_balance: false
       });
 
-      const result = db.prepare(`
-        INSERT INTO User_Profiles (auth_user_id, nickname, puesto, branch_id, hire_date, role_level, custom_permissions)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-      `).run(authUserId, nickname, puesto, branch_id, hire_date, role_level || 2, defaultPermissions);
+      // FIX 2026-09-05: el alta NO generaba password_hash → el usuario no podía
+      // loguear (login exige password_hash IS NOT NULL y verifyPassword usa bcrypt).
+      // Ahora: se usa la contraseña proporcionada por el admin, o una temporal
+      // generada, SIEMPRE hasheada con bcrypt (nunca SHA-256).
+      const tempPassword = password && String(password).trim().length >= 4
+        ? String(password).trim()
+        : `SICC${Math.floor(1000 + Math.random() * 9000)}`;
+      const passwordHash = await hashPassword(tempPassword);
 
-      res.status(201).json({ id: result.lastInsertRowid, auth_user_id: authUserId });
+      const result = db.prepare(`
+        INSERT INTO User_Profiles (auth_user_id, nickname, puesto, branch_id, hire_date, role_level, custom_permissions, password_hash, force_password_change)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        authUserId,
+        nickname,
+        puesto,
+        branch_id,
+        hire_date,
+        role_level || 2,
+        defaultPermissions,
+        passwordHash,
+        1 // forzar cambio de contraseña en primer inicio
+      );
+
+      // Crear caja para el nuevo cajero (saldo inicial 0)
+      try {
+        db.prepare('INSERT OR IGNORE INTO cajas (cajero_id, saldo_actual_mxn, sucursal_id) VALUES (?, 0, ?)')
+          .run(authUserId, branch_id || 'MAIN_BRANCH');
+      } catch (e) {}
+
+      res.status(201).json({
+        id: result.lastInsertRowid,
+        auth_user_id: authUserId,
+        temp_password: tempPassword,
+        message: 'Usuario creado correctamente. Credenciales generadas (visibles una sola vez).'
+      });
+    } catch (error) {
+      res.status(500).json({ error: (error as Error).message });
+    }
+  });
+
+  // --- GESTIÓN DE USUARIOS DESDE PANEL ADMINISTRADOR ---
+  // Listar todos los usuarios (sin exponer hash)
+  app.get('/api/auth/users', authenticateToken, requireRole(5), (req: AuthenticatedRequest, res) => {
+    try {
+      const users = db.prepare(`
+        SELECT auth_user_id, nickname, puesto, role_level, branch_id, is_active,
+               force_password_change, created_at, last_login
+        FROM User_Profiles
+        ORDER BY created_at DESC
+      `).all();
+      res.json({ status: 'success', data: users });
+    } catch (error) {
+      res.status(500).json({ error: (error as Error).message });
+    }
+  });
+
+  // Resetear contraseña de un usuario (admin Nivel 5)
+  app.post('/api/auth/users/reset-password', authenticateToken, requireRole(5), async (req: AuthenticatedRequest, res) => {
+    const { auth_user_id, new_password } = req.body;
+    if (!auth_user_id) {
+      return res.status(400).json({ error: 'Se requiere auth_user_id' });
+    }
+    try {
+      const newPass = new_password && String(new_password).trim().length >= 4
+        ? String(new_password).trim()
+        : `SICC${Math.floor(1000 + Math.random() * 9000)}`;
+      const passwordHash = await hashPassword(newPass);
+
+      const result = db.prepare(`
+        UPDATE User_Profiles
+        SET password_hash = ?, force_password_change = 1, locked_until = NULL, failed_login_attempts = 0
+        WHERE auth_user_id = ?
+      `).run(passwordHash, auth_user_id);
+
+      if (result.changes === 0) {
+        return res.status(404).json({ error: 'Usuario no encontrado' });
+      }
+
+      res.json({
+        status: 'success',
+        auth_user_id,
+        new_password: newPass,
+        message: 'Contraseña restablecida correctamente'
+      });
+    } catch (error) {
+      res.status(500).json({ error: (error as Error).message });
+    }
+  });
+
+  // Dar de baja / reactivar usuario (admin Nivel 5)
+  app.post('/api/auth/users/toggle-active', authenticateToken, requireRole(5), (req: AuthenticatedRequest, res) => {
+    const { auth_user_id, is_active } = req.body;
+    if (!auth_user_id) {
+      return res.status(400).json({ error: 'Se requiere auth_user_id' });
+    }
+    try {
+      const result = db.prepare('UPDATE User_Profiles SET is_active = ? WHERE auth_user_id = ?')
+        .run(is_active ? 1 : 0, auth_user_id);
+
+      if (result.changes === 0) {
+        return res.status(404).json({ error: 'Usuario no encontrado' });
+      }
+
+      res.json({
+        status: 'success',
+        auth_user_id,
+        is_active: is_active ? 1 : 0,
+        message: is_active ? 'Usuario reactivado' : 'Usuario dado de baja'
+      });
     } catch (error) {
       res.status(500).json({ error: (error as Error).message });
     }
   });
 
   // --- MÓDULO DE APERTURA Y CONTROL DE TURNOS (Shift Control API) ---
-  app.get('/api/shifts/status', (req, res) => {
-    const userId = req.headers['x-user-id'] || 'user_cajero_1';
+  app.get('/api/shifts/status', authenticateToken, (req: AuthenticatedRequest, res) => {
+    const userId = req.user?.auth_user_id || req.user?.id;
+    if (!userId) {
+      return res.status(401).json({ error: 'Usuario no autenticado' });
+    }
+    
     try {
       const shift = db.prepare('SELECT * FROM shift_logs WHERE cajero_id = ? ORDER BY id DESC LIMIT 1').get(userId) as any;
       if (shift) {
@@ -639,7 +770,7 @@ async function startServer() {
     }
   });
 
-  app.get('/api/shifts/pending-authorizations', (req, res) => {
+  app.get('/api/shifts/pending-authorizations', authenticateToken, requireRole(3), (req: AuthenticatedRequest, res) => {
     try {
       const shifts = db.prepare("SELECT * FROM shift_logs WHERE status = 'PENDING_AUTHORIZATION' ORDER BY id DESC").all() as any[];
       shifts.forEach(shift => {
@@ -653,8 +784,12 @@ async function startServer() {
     }
   });
 
-  app.post('/api/shifts/open', (req, res) => {
-    const userId = req.headers['x-user-id'] || 'user_cajero_1';
+  app.post('/api/shifts/open', authenticateToken, requireRole(2), (req: AuthenticatedRequest, res) => {
+    const userId = req.user?.auth_user_id || req.user?.id;
+    if (!userId) {
+      return res.status(401).json({ error: 'Usuario no autenticado' });
+    }
+    
     const { counts } = req.body; // e.g., { MXN: { "500": 10, ... }, USD: { "100": 5 } }
     
     try {
@@ -732,17 +867,17 @@ async function startServer() {
     }
   });
 
-  app.post('/api/shifts/authorize', (req, res) => {
-    const managerId = req.headers['x-user-id'] || 'user_gerente_1';
+  app.post('/api/shifts/authorize', authenticateToken, requireRole(4), (req: AuthenticatedRequest, res) => {
+    const managerId = req.user?.auth_user_id || req.user?.id;
+    if (!managerId) {
+      return res.status(401).json({ error: 'Usuario no autenticado' });
+    }
+    
     const { shift_id } = req.body;
 
     try {
-      // 1. Verify authorization permission (must be GERENTE level 4 or SUPER_ADMIN level 5)
-      const managerProfile = db.prepare('SELECT nickname, role_level FROM User_Profiles WHERE auth_user_id = ?').get(managerId) as any;
-      if (!managerProfile || managerProfile.role_level < 4) {
-        return res.status(403).json({ error: 'Acceso Denegado: Se requieren credenciales de Gerente u Oficial de Cumplimiento.' });
-      }
-
+      // 1. Authorization is already verified by requireRole(4) middleware
+      
       // 2. Fetch shift details
       const shift = db.prepare('SELECT * FROM shift_logs WHERE id = ?').get(shift_id) as any;
       if (!shift) {
@@ -761,7 +896,7 @@ async function startServer() {
         UPDATE shift_logs 
         SET status = 'OPEN', authorized_by = ?, authorization_date = CURRENT_TIMESTAMP 
         WHERE id = ?
-      `).run(managerProfile.nickname, shift_id);
+      `).run(req.user?.nickname || req.user?.auth_user_id || 'Gerente', shift_id);
 
       // 4. Trigger Contable & Inventory Alignment
       // Align vault bill-by-bill counts in Inventario_Boveda_Detalle to match declared physical count
@@ -1634,7 +1769,7 @@ async function startServer() {
   });
 
   // Endpoint 4: Finalize Onboarding & Insert into User_Profiles
-  app.post('/api/hr/vault/finalize', (req, res) => {
+  app.post('/api/hr/vault/finalize', async (req, res) => {
     const managerId = req.headers['x-user-id'] || 'user_gerente_1';
     const { curp } = req.body;
     try {
@@ -1665,8 +1800,10 @@ async function startServer() {
       });
 
       // Insert operator into User_Profiles with auto-generated password
+      // FIX 2026-09-05: usaba SHA-256 → verifyPassword (bcrypt) nunca coincidía.
+      // Ahora siempre bcrypt.
       const tempPassword = curp.substring(0, 4).toUpperCase() + '2026';
-      const passwordHash = createHash('sha256').update(tempPassword).digest('hex');
+      const passwordHash = await hashPassword(tempPassword);
 
       db.prepare(`
         INSERT INTO User_Profiles (auth_user_id, nickname, puesto, branch_id, hire_date, role_level, custom_permissions, password_hash)
@@ -1893,17 +2030,10 @@ async function startServer() {
   };
 
   const processFIFO = (currency: string, quantityToSell: number, salePrice: number, txId: string) => {
-    let remaining = quantityToSell;
-    let totalCostBasis = 0;
-    const batches = db.prepare(`SELECT * FROM Inventory_Batches WHERE currency_code = ? AND remaining_quantity > 0 ORDER BY created_at ASC`).all(currency) as any[];
-    for (const batch of batches) {
-      const takeFromBatch = Math.min(remaining, batch.remaining_quantity);
-      totalCostBasis += takeFromBatch * batch.cost_basis;
-      db.prepare(`UPDATE Inventory_Batches SET remaining_quantity = remaining_quantity - ? WHERE id = ?`).run(takeFromBatch, batch.id);
-      remaining -= takeFromBatch;
-      if (remaining <= 0) break;
-    }
-    return totalCostBasis;
+    // Delega al módulo extraído (Fase 5) para que el fraccionamiento de lotes
+    // sea testeable de forma aislada. Mantiene la misma firma y comportamiento.
+    const resultado = ejecutarFIFO(db, currency, quantityToSell);
+    return resultado.costoTotal;
   };
 
   // Módulo de Cierre: Revaluación de Inventario (Balance FIX)
@@ -2587,11 +2717,21 @@ async function startServer() {
         }
 
         // Validation: Sufficient stock for outgoing CASH
-        if (methodOut === 'CASH' && denomsOutArray.length > 0) {
-          for (const d of denomsOutArray) {
-            const stock = db.prepare("SELECT quantity FROM Inventario_Boveda_Detalle WHERE currency = ? AND denominacion = ? AND branch_id = ?").get(currencyOut, d.denominacion, branchId);
-            if (!stock || stock.quantity < d.quantity) {
-              throw new Error(`Existencia insuficiente (${stock?.quantity || 0}) para la denominación de ${d.denominacion} ${currencyOut}`);
+        if (methodOut === 'CASH') {
+          // 1. Validar saldo total de bóveda para la divisa de salida
+          const boveda = db.prepare('SELECT balance FROM Boveda WHERE currency = ?').get(currencyOut) as any;
+          const saldoBoveda = boveda?.balance || 0;
+          if (saldoBoveda < parseFloat(amountOut)) {
+            throw new Error(`Existencia insuficiente de ${currencyOut} en bóveda. Saldo actual: ${saldoBoveda}. Se requieren: ${amountOut}. Solicite una dotación de emergencia.`);
+          }
+
+          // 2. Validar denominaciones individuales si se proporcionaron
+          if (denomsOutArray.length > 0) {
+            for (const d of denomsOutArray) {
+              const stock = db.prepare("SELECT quantity FROM Inventario_Boveda_Detalle WHERE currency = ? AND denominacion = ? AND branch_id = ?").get(currencyOut, d.denominacion, branchId);
+              if (!stock || stock.quantity < d.quantity) {
+                throw new Error(`Existencia insuficiente (${stock?.quantity || 0}) para la denominación de ${d.denominacion} ${currencyOut}. Solicite una dotación de emergencia.`);
+              }
             }
           }
         }
@@ -2884,7 +3024,7 @@ async function startServer() {
           currencyOut,
           methodOut,
           amountOut,
-          rate,
+          rate: parseFloat(rate),
           markup,
           incomingTransfer: methodIn === 'TRANSFER' ? {
             bank: incomingBankName,
@@ -3726,7 +3866,8 @@ async function startServer() {
     }
   });
 
-  app.get("/api/liquidity/dotaciones", (req, res) => {
+  // Dotaciones - requiere autenticación y nivel 4+ (gerente)
+  app.get("/api/liquidity/dotaciones", authenticateToken, requireRole(3), (req, res) => {
     try {
       const rows = db.prepare(`
         SELECT d.*, 
@@ -3743,7 +3884,7 @@ async function startServer() {
     }
   });
 
-  app.post("/api/liquidity/dotaciones", (req, res) => {
+  app.post("/api/liquidity/dotaciones", authenticateToken, requireRole(4), (req: AuthenticatedRequest, res) => {
     const { gerente_id, cajero_id, monto_mxn, tipo_dotacion, folio_boveda, desglose_json } = req.body;
 
     if (!cajero_id || !monto_mxn || !tipo_dotacion) {
@@ -4123,77 +4264,130 @@ async function startServer() {
 
   // --- REAL-TIME COMPLIANCE & AML ENDPOINTS ---
 
-  // 1. Search Blacklists (OFAC, PEP, CNBV, SAT 69-B) Concurrently/Sequentially
+  // 1. Search Blacklists (OFAC, PEP, CNBV, SAT 69-B) con FUZZY MATCHING FONÉTICO
+  //    Reemplaza la búsqueda LIKE simple por el motor de cumplimiento Fase 4:
+  //    Double Metaphone + Levenshtein sobre índice fonético SQL (39k+ registros OFAC reales).
   app.get("/api/compliance/search-lists", (req, res) => {
-    const { q } = req.query;
+    const { q, umbral } = req.query;
     if (!q) {
       return res.json({ status: "success", data: { matches: [], riskLevel: "VERDE" } });
     }
 
     try {
-      const qLower = `%${(q as string).toLowerCase().trim()}%`;
+      const umbralNum = umbral ? parseFloat(umbral as string) : 0.55;
+      const resultado = buscarEnListas((q as string).trim(), umbralNum);
 
-      // Perform synchronous database lookups matching "concurrente" conceptually
-      const ofac = db.prepare("SELECT * FROM lista_ofac WHERE LOWER(nombre_completo) LIKE ?").all(qLower) as any[];
-      const pep = db.prepare("SELECT * FROM lista_pep WHERE LOWER(nombre_completo) LIKE ?").all(qLower) as any[];
-      const cnbv = db.prepare("SELECT * FROM lista_cnbv WHERE LOWER(nombre_completo) LIKE ?").all(qLower) as any[];
-      const sat = db.prepare("SELECT * FROM lista_sat WHERE LOWER(nombre_completo) LIKE ?").all(qLower) as any[];
+      // Mapear al formato esperado por el frontend
+      const matches = resultado.matches.map(m => ({
+        id: m.id,
+        nombre_completo: m.nombre_completo,
+        lista: m.lista === 'SAT' ? 'SAT 69-B' : m.lista,
+        tipo_coincidencia: m.tipo_coincidencia,
+        detalles: m.detalles,
+        // Metadata del fuzzy matching (transparencia)
+        score_similitud: m.score_similitud,
+        nivel_match: m.nivel_match,        // EXACTO | FONETICO | SIMILAR
+        match_fonetico: m.match_fonetico,
+      }));
 
-      const matches: any[] = [];
-
-      ofac.forEach(m => {
-        matches.push({
-          id: `OFAC-${m.id}`,
-          nombre_completo: m.nombre_completo,
-          lista: "OFAC",
-          tipo_coincidencia: m.tipo_coincidencia,
-          detalles: m.motivo
-        });
+      res.json({
+        status: "success",
+        data: {
+          matches,
+          riskLevel: resultado.riskLevel,
+          meta: {
+            candidatosRevisados: resultado.totalRevisados,
+            tiempoMs: resultado.tiempoMs,
+            motor: 'fuzzy-fonetico-v1',
+          },
+        },
       });
-
-      pep.forEach(m => {
-        matches.push({
-          id: `PEP-${m.id}`,
-          nombre_completo: m.nombre_completo,
-          lista: "PEP",
-          tipo_coincidencia: m.tipo_coincidencia,
-          detalles: `Cargo: ${m.cargo}`
-        });
-      });
-
-      cnbv.forEach(m => {
-        matches.push({
-          id: `CNBV-${m.id}`,
-          nombre_completo: m.nombre_completo,
-          lista: "CNBV",
-          tipo_coincidencia: m.tipo_coincidencia,
-          detalles: `Resolución: ${m.resolucion}`
-        });
-      });
-
-      sat.forEach(m => {
-        matches.push({
-          id: `SAT-${m.id}`,
-          nombre_completo: m.nombre_completo,
-          lista: "SAT 69-B",
-          tipo_coincidencia: m.tipo_coincidencia,
-          detalles: `Situación: ${m.situacion}`
-        });
-      });
-
-      let riskLevel = "VERDE";
-      const hasRed = matches.some(m => m.tipo_coincidencia === "RED");
-      const hasYellow = matches.some(m => m.tipo_coincidencia === "AMARILLO");
-
-      if (hasRed) {
-        riskLevel = "ROJO";
-      } else if (hasYellow) {
-        riskLevel = "AMARILLO";
-      }
-
-      res.json({ status: "success", data: { matches, riskLevel } });
     } catch (error) {
       console.error("Error searching blacklists:", error);
+      res.status(500).json({ status: "error", message: (error as Error).message });
+    }
+  });
+
+  // 1.b Consultar requisitos de captura obligatoria para un monto (candados)
+  app.get("/api/compliance/requisitos-captura", (req, res) => {
+    const monto = parseFloat((req.query.monto_usd as string) || '0');
+    if (isNaN(monto) || monto < 0) {
+      return res.status(400).json({ status: "error", message: "monto_usd inválido" });
+    }
+    const req_ = requisitosCapturaPorMonto(monto);
+    res.json({ status: "success", data: req_ });
+  });
+
+  // 1.c Validar candado de captura antes de permitir una operación
+  //     Devuelve permitido=false + faltantes si no se cumplen los requisitos.
+  app.post("/api/compliance/validar-captura", express.json(), (req, res) => {
+    const { monto_usd, tiene_id, tiene_domicilio, tiene_expediente, clave_n5 } = req.body;
+    const monto = parseFloat(monto_usd);
+    if (isNaN(monto) || monto < 0) {
+      return res.status(400).json({ status: "error", message: "monto_usd inválido" });
+    }
+    const resultado = validarCandadoCaptura(monto, {
+      tiene_id: !!tiene_id,
+      tiene_domicilio: !!tiene_domicilio,
+      tiene_expediente: !!tiene_expediente,
+      clave_n5: clave_n5,
+    });
+    res.json({ status: "success", data: resultado });
+  });
+
+  // 1.d Generar PDF del Formato de Desviación de arqueo
+  app.post("/api/compliance/formato-desviacion-pdf", express.json(), async (req, res) => {
+    try {
+      const d = req.body;
+      if (!d.folio || !d.cajeroNombre || !Array.isArray(d.desviaciones)) {
+        return res.status(400).json({ status: "error", message: "Faltan datos obligatorios (folio, cajeroNombre, desviaciones[])" });
+      }
+      const pdf = await generarFormatoDesviacionPDF({
+        folio: d.folio,
+        fecha: d.fecha || new Date().toLocaleString('es-MX'),
+        cajeroNombre: d.cajeroNombre,
+        cajeroId: d.cajeroId || '',
+        sucursal: d.sucursal || 'N/A',
+        terminal: d.terminal,
+        turnoId: d.turnoId || 'N/A',
+        desviaciones: d.desviaciones,
+        totalEquivalenteMxn: d.totalEquivalenteMxn || 0,
+        autorizadoPor: d.autorizadoPor,
+        claveAutorizacion: d.claveAutorizacion,
+        observaciones: d.observaciones,
+      });
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="desviacion_${d.folio}.pdf"`);
+      res.send(pdf);
+    } catch (error) {
+      console.error("Error generando PDF de desviación:", error);
+      res.status(500).json({ status: "error", message: (error as Error).message });
+    }
+  });
+
+  // 1.e Reporte RIP trimestral (JSON o CSV)
+  app.get("/api/compliance/reporte-rip", (req, res) => {
+    try {
+      const anio = parseInt((req.query.anio as string) || String(new Date().getFullYear()), 10);
+      const trimestre = parseInt((req.query.trimestre as string) || '1', 10);
+      const formato = (req.query.formato as string) || 'json';
+
+      if (trimestre < 1 || trimestre > 4) {
+        return res.status(400).json({ status: "error", message: "trimestre debe ser 1-4" });
+      }
+
+      const reporte = generarReporteRip({ anio, trimestre: trimestre as 1 | 2 | 3 | 4 });
+
+      if (formato === 'csv') {
+        const csv = reporteRipACsv(reporte);
+        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+        res.setHeader('Content-Disposition', `attachment; filename="RIP_${reporte.periodo}.csv"`);
+        return res.send(csv);
+      }
+
+      res.json({ status: "success", data: reporte });
+    } catch (error) {
+      console.error("Error generando reporte RIP:", error);
       res.status(500).json({ status: "error", message: (error as Error).message });
     }
   });
@@ -4649,8 +4843,16 @@ async function startServer() {
     });
   }
 
+  return app;
+}
+
+async function startServer() {
+  const app = await createApp();
+  // FIX deploy 2026-09-03: puerto desde entorno (Hostinger asigna PORT por env).
+  // Default 3000 para desarrollo local.
+  const PORT = parseInt(process.env.PORT || "3000", 10);
   app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+    console.log(`Server running on http://0.0.0.0:${PORT} (NODE_ENV=${process.env.NODE_ENV || 'development'})`);
   });
 }
 

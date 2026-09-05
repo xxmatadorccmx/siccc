@@ -677,7 +677,7 @@ export default function Compliance() {
                                           alertId: alert.id,
                                           status: "RESOLVED",
                                           notes,
-                                          resolvedBy: profile?.username || "OFICIAL_CUMPLIMIENTO"
+                                          resolvedBy: profile?.auth_user_id || "OFICIAL_CUMPLIMIENTO"
                                         })
                                       });
                                       if (res.ok) {
@@ -703,7 +703,7 @@ export default function Compliance() {
                                           alertId: alert.id,
                                           status: "REPORTED_CNBV",
                                           notes,
-                                          resolvedBy: profile?.username || "OFICIAL_CUMPLIMIENTO"
+                                          resolvedBy: profile?.auth_user_id || "OFICIAL_CUMPLIMIENTO"
                                         })
                                       });
                                       if (res.ok) {

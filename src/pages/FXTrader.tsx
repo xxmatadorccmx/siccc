@@ -242,7 +242,7 @@ export default function FXTrader() {
   const [showDenomsModal, setShowDenomsModal] = useState<"IN" | "OUT" | null>(null);
 
   // Compliance & Supervisor States
-  const { profile } = useAuth();
+  const { profile, token } = useAuth();
   const [partnerId, setPartnerId] = useState("");
   const [ticketCode, setTicketCode] = useState("");
   const [isValidatingTicket, setIsValidatingTicket] = useState(false);
@@ -427,20 +427,38 @@ export default function FXTrader() {
     }
   }, [ticketCode]);
 
-  // Customer Search Logic (Debounce)
+  // Customer Search Logic (Debounce) + COMPLIANCE CHECK EN VIVO
   useEffect(() => {
     if (customerSearch.length < 3) {
       setSearchResults([]);
+      setBlacklistMatches([]);
+      setBlacklistRiskLevel("VERDE");
       return;
     }
 
     const timer = setTimeout(async () => {
       setIsSearching(true);
       try {
+        // 1. Buscar clientes existentes
         const res = await fetch(`/api/kyc/search?q=${encodeURIComponent(customerSearch)}`);
         const data = await res.json();
         if (data.status === "success") {
           setSearchResults(data.data);
+        }
+
+        // 2. COMPLIANCE EN VIVO: verificar listas OFAC/PEP mientras escribe
+        setBlacklistLoading(true);
+        try {
+          const complianceRes = await fetch(`/api/compliance/search-lists?q=${encodeURIComponent(customerSearch)}`);
+          if (complianceRes.ok) {
+            const complianceData = await complianceRes.json();
+            setBlacklistMatches(complianceData.data?.matches || []);
+            setBlacklistRiskLevel(complianceData.data?.riskLevel || "VERDE");
+          }
+        } catch (err) {
+          console.error("Compliance live check error:", err);
+        } finally {
+          setBlacklistLoading(false);
         }
       } catch (error) {
         console.error("Error searching customers:", error);
@@ -478,11 +496,19 @@ export default function FXTrader() {
     const markupAmount = baseAmountOut * (effectiveMarkup / 100);
     let finalAmountOut = baseAmountOut - markupAmount;
 
-    // Smart Rounding for Cash to avoid unbreakable cent differences
+    // Smart Rounding for Cash: solo redondea si la diferencia es menor al 1%
+    // para evitar distorsiones en el TC como 20 MXN → 1 USD.
     if (methodOut === "CASH") {
-      // Round to nearest 0.50 if currency is MXN, otherwise to nearest integer or appropriate step
       const step = currencyOut.code === 'MXN' ? 0.5 : 1;
-      finalAmountOut = Math.round(finalAmountOut / step) * step;
+      const rounded = Math.round(finalAmountOut / step) * step;
+      // Solo aplicar si la diferencia es < 1% del monto original
+      const diff = Math.abs(rounded - finalAmountOut);
+      if (diff < finalAmountOut * 0.01 || finalAmountOut < step) {
+        finalAmountOut = rounded;
+      } else {
+        // Si la diferencia es > 1%, redondear a 2 decimales (más preciso)
+        finalAmountOut = Math.round(finalAmountOut * 100) / 100;
+      }
     } else {
       finalAmountOut = Math.round(finalAmountOut * 100) / 100;
     }
@@ -599,17 +625,19 @@ export default function FXTrader() {
   }, [methodOut, denominationsOut, calculation.finalTotal]);
 
   // Automatic Triggers: Open modal when amount is entered or currency changed
+  // Tiempo extendido (3s entrada, 4s salida) para que el cajero pueda corregir errores
+  // antes de que el tabulador se abra automáticamente.
   useEffect(() => {
     const val = parseFloat(amountIn) || 0;
     if (methodIn === "CASH" && val > 0 && !isDenomsInValid && !showDenomsModal) {
-      const timer = setTimeout(() => setShowDenomsModal("IN"), 500);
+      const timer = setTimeout(() => setShowDenomsModal("IN"), 3000);
       return () => clearTimeout(timer);
     }
   }, [amountIn, methodIn, isDenomsInValid, showDenomsModal]);
 
   useEffect(() => {
     if (methodOut === "CASH" && calculation.finalTotal > 0 && !isDenomsOutValid && !showDenomsModal) {
-      const timer = setTimeout(() => setShowDenomsModal("OUT"), 1500);
+      const timer = setTimeout(() => setShowDenomsModal("OUT"), 4000);
       return () => clearTimeout(timer);
     }
   }, [calculation.finalTotal, methodOut, isDenomsOutValid, showDenomsModal]);
@@ -941,6 +969,18 @@ export default function FXTrader() {
           setOutgoingTransferDetails(initialTransferDetails);
           setOutgoingFile(null);
           setBaasMode("NONE");
+        } else {
+          // Error del backend: mostrar mensaje al usuario
+          const errMsg = result.message || result.error || "Error desconocido al procesar la operación.";
+          console.error("Backend error:", errMsg);
+
+          // Si el error es por falta de liquidez, mostrar sugerencia de dotación
+          if (errMsg.toLowerCase().includes('existencia') || errMsg.toLowerCase().includes('insuficiente') || errMsg.toLowerCase().includes('saldo')) {
+            alert(`💸 SIN LIQUIDEZ SUFICIENTE\n\n${errMsg}\n\nSugerencia: Solicita una dotación de emergencia usando el botón "🚨 Solicitar Dotación de Emergencia" en el panel de Gestión de Liquidez.`);
+            setShowDotationModal(true);
+          } else {
+            alert(`Error al cerrar operación:\n\n${errMsg}`);
+          }
         }
       }
     } catch (error) {
@@ -1037,7 +1077,7 @@ export default function FXTrader() {
           </div>
           <div className="flex justify-between pt-2 border-t border-[#2b3139] print:border-black">
             <span className="text-gray-500 print:text-black">TIPO DE CAMBIO:</span>
-            <span className="text-white print:text-black font-bold">{showReceipt.rate.toFixed(4)} {showReceipt.currencyOut}/{showReceipt.currencyIn}</span>
+            <span className="text-white print:text-black font-bold">{(typeof showReceipt.rate === 'number' ? showReceipt.rate : Number(showReceipt.rate) || 0).toFixed(4)} {showReceipt.currencyOut}/{showReceipt.currencyIn}</span>
           </div>
           {showReceipt.ticketCode && (
             <div className="flex justify-between border-t border-dashed border-[#2b3139] print:border-black pt-2">
@@ -1094,7 +1134,9 @@ export default function FXTrader() {
             <p className="text-gray-400 text-sm mt-1">Cotizador Multidivisa Bidireccional con Validación KYC.</p>
           </div>
         </header>
-        <ShiftOpeningCount onShiftStatusChange={(status, shift) => {
+        <ShiftOpeningCount 
+          token={token || ''}
+          onShiftStatusChange={(status, shift) => {
           setShiftStatus(status);
           setActiveShift(shift);
         }} />
@@ -1340,10 +1382,15 @@ export default function FXTrader() {
                         <button
                           key={customer.id}
                           onClick={() => {
+                            if (blacklistRiskLevel === 'ROJO') return; // Bloquear si hay match ROJO
                             setSelectedCustomer(customer);
                             setSearchResults([]);
                           }}
-                          className="w-full p-4 hover:bg-black/20 text-left flex items-center justify-between border-b border-[#2b3139] last:border-0 transition-colors"
+                          className={`w-full p-4 text-left flex items-center justify-between border-b border-[#2b3139] last:border-0 transition-colors ${
+                            blacklistRiskLevel === 'ROJO' 
+                              ? 'opacity-40 cursor-not-allowed bg-red-500/5'
+                              : 'hover:bg-black/20'
+                          }`}
                         >
                           <div className="text-left">
                             <div className="text-white font-medium">{customer.full_name}</div>
@@ -1832,12 +1879,12 @@ export default function FXTrader() {
             )}
 
             {/* Panel de Desbloqueo de Dotación de Emergencia */}
-            <div className="mb-6 p-4 rounded-xl border border-blue-500/20 bg-blue-500/5 space-y-3">
+            <div className="mb-6 p-4 rounded-xl border border-[#2b3139] bg-[#181a20] space-y-3">
               <div className="flex items-center justify-between">
-                <span className="text-[11px] font-bold text-blue-400 uppercase tracking-wider flex items-center gap-1">
+                <span className="text-[11px] font-bold text-binance-yellow/70 uppercase tracking-wider flex items-center gap-1">
                   💰 Gestión de Liquidez de Terminal
                 </span>
-                <span className="text-[10px] text-gray-400 font-mono">
+                <span className="text-[10px] text-gray-500 font-mono">
                   MXN
                 </span>
               </div>
@@ -1850,7 +1897,7 @@ export default function FXTrader() {
                 {/* 1. Request Emergency Dotation */}
                 <button
                   onClick={() => setShowDotationModal(true)}
-                  className="w-full text-xs py-2 px-3 rounded-lg font-bold bg-[#1e2329] hover:bg-[#2b3139] text-gray-200 border border-gray-700 transition-colors cursor-pointer"
+                  className="w-full text-xs py-2 px-3 rounded-lg font-bold bg-[#1e2329] hover:bg-[#2b3139] text-gray-200 border border-[#3a3f47] transition-colors cursor-pointer"
                 >
                   🚨 Solicitar Dotación de Emergencia
                 </button>
@@ -1859,8 +1906,8 @@ export default function FXTrader() {
                 <div className="flex gap-2">
                   <input
                     id="input-unlock-key"
-                    placeholder="Clave Autorización (e.g. ABC123456)"
-                    className="flex-1 text-xs px-3 py-2 rounded-lg bg-[#1e2329] border border-gray-700 text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 font-mono uppercase"
+                    placeholder="Clave Autorización"
+                    className="flex-1 min-w-0 text-xs px-3 py-2 rounded-lg bg-[#1e2329] border border-[#3a3f47] text-white placeholder-gray-600 focus:outline-none focus:border-binance-yellow/50 font-mono uppercase"
                   />
                   <button
                     onClick={async () => {
@@ -1887,7 +1934,7 @@ export default function FXTrader() {
                         alert("Error al conectar con el servidor.");
                       }
                     }}
-                    className="text-xs bg-blue-500 hover:bg-blue-600 text-white font-bold px-4 py-2 rounded-lg transition-colors cursor-pointer"
+                    className="shrink-0 text-xs bg-binance-yellow hover:bg-yellow-500 text-black font-bold px-4 py-2 rounded-lg transition-colors cursor-pointer"
                   >
                     Desbloquear
                   </button>
@@ -1895,8 +1942,8 @@ export default function FXTrader() {
               </div>
             </div>
 
-            {/* Compliance Alerts Panel & Semáforo de Riesgo */}
-            {selectedCustomer && (
+            {/* Compliance Alerts Panel & Semáforo de Riesgo — EN VIVO mientras busca */}
+            {(customerSearch.length >= 3 || selectedCustomer) && (
               <div className="mb-6 space-y-3">
                 {/* 1. Semáforo de Riesgo (Live Blacklist Results) */}
                 <div className={`p-4 rounded-xl border transition-all ${
@@ -2225,6 +2272,23 @@ export default function FXTrader() {
               )}
             </button>
 
+            {/* Feedback: explicar por qué está deshabilitado */}
+            {!selectedCustomer && (
+              <p className="text-[10px] text-gray-500 text-center mt-2">
+                ⚠️ Seleccione un cliente para habilitar el cierre de operación
+              </p>
+            )}
+            {selectedCustomer && amountIn && !isDenomsInValid && methodIn === "CASH" && (
+              <p className="text-[10px] text-binance-yellow text-center mt-2">
+                ⚠️ Tabule los billetes recibidos (arqueo pendiente) para habilitar el cierre
+              </p>
+            )}
+            {selectedCustomer && amountIn && !isDenomsOutValid && methodOut === "CASH" && calculation.finalTotal > 0 && (
+              <p className="text-[10px] text-binance-yellow text-center mt-2">
+                ⚠️ Tabule los billetes a entregar (arqueo pendiente) para habilitar el cierre
+              </p>
+            )}
+
             <div className="mt-6 p-4 bg-black/20 rounded-xl space-y-2">
               <div className="flex items-center gap-2 text-[10px] text-gray-500 uppercase">
                 <AlertCircle size={12} /> Nota de Auditoría
@@ -2420,6 +2484,12 @@ export default function FXTrader() {
             breakdown={showDenomsModal === "IN" ? denominationsIn : denominationsOut}
             setBreakdown={showDenomsModal === "IN" ? setDenominationsIn : setDenominationsOut}
             onClose={() => setShowDenomsModal(null)}
+            onGoBack={() => {
+              if (showDenomsModal === "IN") {
+                setAmountIn("");
+              }
+              setShowDenomsModal(null);
+            }}
             denoms={denomsConfig[showDenomsModal === "IN" ? currencyIn.code : currencyOut.code] || []}
             targetAmount={showDenomsModal === "IN" ? (parseFloat(amountIn) || 0) : calculation.finalTotal}
           />
@@ -2597,6 +2667,7 @@ function DenominationsModal({
   breakdown, 
   setBreakdown, 
   onClose,
+  onGoBack,
   denoms,
   targetAmount
 }: { 
@@ -2605,6 +2676,7 @@ function DenominationsModal({
   breakdown: Record<number, number>, 
   setBreakdown: (b: Record<number, number>) => void,
   onClose: () => void,
+  onGoBack?: () => void,
   denoms: any[],
   targetAmount: number
 }) {
@@ -2635,18 +2707,12 @@ function DenominationsModal({
   };
 
   const getBillColor = (value: number, curr: string) => {
-    if (curr === 'USD') return 'bg-emerald-800/40 text-emerald-400 border-emerald-500/30';
+    if (curr === 'USD') return 'bg-[#1e2329] text-gray-200 border-[#3a3f47]';
     if (curr === 'MXN') {
-      if (value >= 1000) return 'bg-purple-800/40 text-purple-400 border-purple-500/30';
-      if (value >= 500) return 'bg-blue-800/40 text-blue-400 border-blue-500/30';
-      if (value >= 200) return 'bg-green-800/40 text-green-400 border-green-500/30';
-      if (value >= 100) return 'bg-red-800/40 text-red-400 border-red-500/30';
-      if (value >= 50) return 'bg-pink-800/40 text-pink-400 border-pink-500/30';
-      return 'bg-blue-800/40 text-blue-400 border-blue-500/30';
+      return 'bg-[#1e2329] text-gray-200 border-[#3a3f47]';
     }
-    return 'bg-zinc-800/40 text-zinc-400 border-zinc-500/30';
+    return 'bg-[#181a20] text-gray-400 border-[#2b3139]';
   };
-  
   const handleUpdate = (denom: number, value: number) => {
     const newBreakdown = { ...breakdown, [denom]: value };
     if (value <= 0) delete newBreakdown[denom];
@@ -2871,6 +2937,16 @@ function DenominationsModal({
               </div>
             )}
           </button>
+
+          {onGoBack && (
+            <button
+              onClick={onGoBack}
+              className="w-full py-2 rounded-lg font-medium text-xs transition-all border border-[#2b3139] hover:border-red-500/30 text-gray-400 hover:text-red-400 flex items-center justify-center gap-2 mt-2"
+            >
+              <X size={14} />
+              Volver a editar monto
+            </button>
+          )}
         </div>
       </motion.div>
     </motion.div>

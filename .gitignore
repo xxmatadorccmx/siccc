@@ -8,3 +8,27 @@ coverage/
 !.env.example
 baas_platform.db
 uploads/
+
+# ── Playwright (Fase 5) ──
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
+
+# ── Bases de datos de test (Fases 1-5) ──
+test_baas_platform.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# DB temporal de tests E2E (Playwright)
+e2e_test_db.tmp.sqlite
+
+# ── Scripts de mantenimiento local (no van al repo) ──
+*.cjs
+.hermes/
+
+# ── Listas OFAC crudas (datos, no código) ──
+sdn.csv
+alt.csv
+add.csv

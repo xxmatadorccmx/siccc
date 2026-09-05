@@ -1,6 +1,9 @@
 
 import React from 'react';
-import { Navigate, useLocation } from 'react-router-dom';
+// FIX 2026-09-03 (pantalla negra en módulos): esta app NO usa react-router
+// (navega por activeTab/useState), pero AuthGuard importaba useLocation(),
+// que exige un <Router> que no existe → crash del árbol completo de React
+// al abrir cualquier módulo protegido. Se eliminó la dependencia muerta.
 import { useAuth } from '../contexts/AuthContext';
 import { RoleLevel } from '../types/auth';
 import { ShieldAlert, Loader2 } from 'lucide-react';
@@ -12,7 +15,6 @@ interface AuthGuardProps {
 
 export const AuthGuard: React.FC<AuthGuardProps> = ({ children, minLevel = RoleLevel.CAJA }) => {
   const { profile, loading, hasPermission } = useAuth();
-  const location = useLocation();
 
   if (loading) {
     return (
@@ -34,7 +36,6 @@ export const AuthGuard: React.FC<AuthGuardProps> = ({ children, minLevel = RoleL
           </p>
           <button 
             onClick={() => {
-              localStorage.setItem('mock_user_id', 'user_cajero_1');
               window.location.reload();
             }}
             className="w-full py-2.5 bg-binance-yellow hover:bg-yellow-500 text-black font-black rounded-xl transition-colors text-xs uppercase tracking-wider"
@@ -54,7 +55,7 @@ export const AuthGuard: React.FC<AuthGuardProps> = ({ children, minLevel = RoleL
           <h2 className="text-2xl font-black mb-4">ACCESO RESTRINGIDO</h2>
           <p className="text-gray-400 mb-8">
             Su nivel de autorización actual (<span className="text-white font-bold">{profile.role_level}</span>) 
-            no permite el acceso al módulo <span className="text-white font-bold">{location.pathname}</span>.
+            no permite el acceso a este módulo.
           </p>
           <button 
             onClick={() => window.history.back()}

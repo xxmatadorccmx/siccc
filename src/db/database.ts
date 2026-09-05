@@ -4,7 +4,7 @@ import fs from "fs";
 import { createHash } from "crypto";
 
 let db: any;
-const dbPath = "baas_platform.db";
+const dbPath = process.env.DB_PATH || "baas_platform.db";
 
 try {
   db = new Database(dbPath);
@@ -538,8 +538,24 @@ function runMigrationsAndSetup() {
     VALUES (?, ?, ?, ?, ?, ?, ?)
   `);
 
-  upsertUser.run('user_cajero_1', 'FREDDY', 'Super Administrador', 5, 'MAIN_BRANCH', adminPermissions, defaultHash);
-  upsertUser.run('user_gerente_1', 'ADMIN_MASTER', 'Gerente de Sucursal', 5, 'MAIN_BRANCH', adminPermissions, defaultHash);
+  // FIX P0 #2 (auditoria 20260903): antes INSERT OR REPLACE con hash SHA-256,
+  // lo que PISABA el hash bcrypt de usuarios existentes en cada arranque,
+  // dejandolos sin login (verifyPassword usa solo bcrypt.compare).
+  // Ahora: INSERT con hash bcrypt verificado; ON CONFLICT solo actualiza
+  // metadatos si el usuario aun no tiene contrasena (preserva hashes existentes).
+  const cajeroHash = '$2b$12$7al3nbC//44VWvpN3uxl3eJNEeYBbJDDajRWiSw3egRNxAmjugLte'; // bcrypt('123456') 12 rounds
+  const seedUser = db.prepare(`
+    INSERT INTO User_Profiles (auth_user_id, nickname, puesto, role_level, branch_id, custom_permissions, password_hash)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(auth_user_id) DO UPDATE SET
+      nickname = excluded.nickname,
+      puesto = excluded.puesto,
+      role_level = excluded.role_level,
+      custom_permissions = excluded.custom_permissions
+    WHERE User_Profiles.password_hash IS NULL
+  `);
+  seedUser.run('user_cajero_1', 'FREDDY', 'Super Administrador', 5, 'MAIN_BRANCH', adminPermissions, cajeroHash);
+  seedUser.run('user_gerente_1', 'ADMIN_MASTER', 'Gerente de Sucursal', 5, 'MAIN_BRANCH', adminPermissions, cajeroHash);
 
   // Migration for hire_date
   try {
@@ -1028,8 +1044,71 @@ function runMigrationsAndSetup() {
 
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// FIX P0 #1 (auditoria 20260903): Runner de migraciones SQL.
+// Antes: los .sql de src/migrations/ NUNCA se aplicaban al arrancar (solo los
+// tests los usaban via vitest.setup.ts). Una DB nueva no tenia las columnas
+// de seguridad -> login 500 (no such column: failed_login_attempts).
+// Ahora: se aplican al arranque, statement por statement, idempotente:
+// errores de "duplicate column"/"already exists" se ignoran; cualquier otro
+// error se reporta pero NO detiene el arranque.
+// ═══════════════════════════════════════════════════════════════════════════
+function applySqlMigrations() {
+  const migrationsDir = path.join(process.cwd(), 'src', 'migrations');
+  if (!fs.existsSync(migrationsDir)) {
+    console.warn('[Migrations] Directorio src/migrations no encontrado, se omite');
+    return;
+  }
+  const files = fs.readdirSync(migrationsDir)
+    .filter(f => f.endsWith('.sql'))
+    .sort(); // orden lexicografico: 001, 002, 003...
+  for (const file of files) {
+    const sqlText = fs.readFileSync(path.join(migrationsDir, file), 'utf8');
+    // Separar statements respetando BEGIN...END de triggers: split por ';'
+    // seguido de newline, y filtrar lineas de comentario sueltas
+    // Separar statements respetando bloques BEGIN...END de triggers:
+    // un ';' SOLO cierra statement si no estamos dentro de un BEGIN...END.
+    const statements: string[] = [];
+    let current = '';
+    let depth = 0;
+    for (const line of sqlText.split('\n')) {
+      const stripped = line.replace(/^(\s*--[^\n]*)$/, '').trim();
+      current += line + '\n';
+      const ups = (line.match(/\bBEGIN\b/gi) || []).length;
+      const downs = (line.match(/\bEND\b/gi) || []).length;
+      depth += ups - downs;
+      // contar ';' solo si depth==0 (fuera de trigger body)
+      const semi = (line.match(/;/g) || []).length;
+      if (depth <= 0 && semi > 0) {
+        const clean = current.replace(/^(\s*--[^\n]*\n)+/g, '').trim();
+        if (clean.length > 0) statements.push(clean);
+        current = '';
+        depth = Math.max(0, depth);
+      }
+    }
+    const tail = current.replace(/^(\s*--[^\n]*\n)+/g, '').trim();
+    if (tail.length > 0) statements.push(tail);
+    let applied = 0, skipped = 0;
+    for (const stmt of statements) {
+      try {
+        db.exec(stmt);
+        applied++;
+      } catch (e: any) {
+        const msg = String(e.message || '');
+        if (msg.includes('duplicate column') || msg.includes('already exists')) {
+          skipped++; // idempotente: ya aplicado
+        } else {
+          console.warn(`[Migrations] ${file}: statement omitido — ${msg}`);
+        }
+      }
+    }
+    console.log(`[Migrations] ${file}: ${applied} aplicados, ${skipped} ya existentes`);
+  }
+}
+
 try {
   runMigrationsAndSetup();
+  applySqlMigrations();
 } catch (error: any) {
   console.error("Error creating tables or migrating:", error);
   if (error && error.message && (error.message.includes("malformed") || error.message.includes("corrupt"))) {

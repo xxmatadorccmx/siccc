@@ -97,23 +97,23 @@ export default function Dashboard() {
         </button>
       </div>
 
-      {/* Top Stats Row */}
+      {/* Top Stats Row — datos reales del backend */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4">
         <StatCard 
           title="Volumen Total (24h)" 
-          value="$12.4M" 
-          change="+14.5%" 
-          trend="up" 
+          value={transactions.length > 0 ? formatCurrency(transactions.reduce((s, t) => s + (t.amount || 0), 0), 'USD') : '$0'}
+          change={transactions.length > 0 ? `${transactions.length} ops` : "Sin operaciones"}
+          trend="neutral" 
           icon={<Activity className="text-binance-yellow" size={20} />} 
-          source="PostgreSQL Core"
+          source="SQLite Local"
         />
         <StatCard 
           title="Clientes Activos" 
-          value="1,245" 
-          change="+2.1%" 
-          trend="up" 
+          value="0"
+          change="Primera sesión"
+          trend="neutral" 
           icon={<Database className="text-binance-teal" size={20} />} 
-          source="MongoDB Expedientes"
+          source="SQLite Local"
         />
         <StatCard 
           title="Alertas CNBV" 
@@ -121,15 +121,15 @@ export default function Dashboard() {
           change="Sin Alertas" 
           trend="neutral" 
           icon={<ShieldCheck className="text-binance-yellow" size={20} />} 
-          source="SOFTExchange Legacy"
+          source="Compliance Engine"
         />
         <StatCard 
-          title="Latencia API" 
-          value="45ms" 
-          change="-5ms" 
-          trend="down" 
-          icon={<Server className="text-binance-orange" size={20} />} 
-          source="Zero-Trust Gateway"
+          title="Estado Sistema" 
+          value={loading ? "Cargando" : "Operativo"} 
+          change={loading ? "Sincronizando" : "En línea"}
+          trend="up" 
+          icon={<Server className="text-emerald-500" size={20} />} 
+          source="Local Dev"
         />
       </div>
 
@@ -138,7 +138,7 @@ export default function Dashboard() {
         <div className="col-span-1 bg-[#1e2329] border border-[#2b3139] rounded-2xl p-6">
           <div className="flex items-center justify-between mb-6">
             <h2 className="text-lg font-medium text-white">Tasas FX en Vivo</h2>
-            <span className="text-xs font-mono text-binance-yellow bg-binance-yellow/10 px-2 py-1 rounded">REDIS CACHE</span>
+            <span className="text-xs font-mono text-binance-yellow bg-binance-yellow/10 px-2 py-1 rounded">LOCAL CACHE</span>
           </div>
           <div className="space-y-4">
             {Object.entries(rates).map(([pair, data]: [string, Rate]) => (
@@ -164,11 +164,11 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Legacy Balances (MySQL 5.1) */}
+        {/* Saldos en Bóveda */}
         <div className="col-span-1 lg:col-span-2 bg-[#1e2329] border border-[#2b3139] rounded-2xl p-6">
           <div className="flex items-center justify-between mb-6">
             <h2 className="text-lg font-medium text-white">Saldos en Bóveda</h2>
-            <span className="text-xs font-mono text-binance-teal bg-binance-teal/10 px-2 py-1 rounded">SOFTExchange (MySQL 5.1)</span>
+            <span className="text-xs font-mono text-binance-yellow bg-binance-yellow/10 px-2 py-1 rounded">SQLite Local</span>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
@@ -184,7 +184,7 @@ export default function Dashboard() {
                 {balances.map((b) => (
                   <tr key={b.currency} className="hover:bg-[#2b3139] transition-colors">
                     <td className="py-4 font-medium flex items-center gap-2">
-                      <div className="w-2 h-2 rounded-full bg-binance-teal"></div>
+                      <div className={`w-2 h-2 rounded-full ${b.balance > 0 ? 'bg-binance-yellow' : 'bg-gray-600'}`}></div>
                       {b.currency}
                     </td>
                     <td className="py-4 text-right font-mono">
@@ -209,11 +209,11 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Recent Transactions (PostgreSQL) */}
+      {/* Transacciones Recientes */}
       <div className="bg-[#1e2329] border border-[#2b3139] rounded-2xl p-6">
         <div className="flex items-center justify-between mb-6">
           <h2 className="text-lg font-medium text-white">Transacciones Recientes</h2>
-          <span className="text-xs font-mono text-binance-orange bg-binance-orange/10 px-2 py-1 rounded">POSTGRESQL CORE</span>
+          <span className="text-xs font-mono text-binance-yellow bg-binance-yellow/10 px-2 py-1 rounded">SQLite Local</span>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">

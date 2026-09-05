@@ -26,7 +26,7 @@ interface DashboardLayoutProps {
 
 export default function DashboardLayout({ children, activeTab, setActiveTab }: DashboardLayoutProps) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const { profile, hasPermission, switchUser, logout } = useAuth();
+  const { profile, hasPermission, logout } = useAuth();
 
   const toggleSidebar = () => setIsSidebarOpen(!isSidebarOpen);
 
@@ -62,79 +62,93 @@ export default function DashboardLayout({ children, activeTab, setActiveTab }: D
         </div>
         
         <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
-          <NavItem 
-            icon={<LayoutDashboard size={20} />} 
-            label="Panel de Control" 
-            active={activeTab === 'dashboard'} 
-            onClick={() => handleNavClick('dashboard')} 
-          />
-          
-          <NavItem 
-            icon={<CreditCard size={20} />} 
-            label="BaaS (Fintech VIP)" 
-            active={activeTab === 'baas'} 
-            onClick={() => handleNavClick('baas')} 
-          />
+          {/* Cajeros (nivel ≤ 3): solo FX Trader */}
+          {(profile?.role_level || 5) <= 3 ? (
+            <>
+              <NavItem 
+                icon={<ArrowLeftRight size={20} />} 
+                label="FX Trader" 
+                active={activeTab === 'fx-trader'} 
+                onClick={() => handleNavClick('fx-trader')} 
+              />
+            </>
+          ) : (
+            <>
+              <NavItem 
+                icon={<LayoutDashboard size={20} />} 
+                label="Panel de Control" 
+                active={activeTab === 'dashboard'} 
+                onClick={() => handleNavClick('dashboard')} 
+              />
+              
+              <NavItem 
+                icon={<CreditCard size={20} />} 
+                label="BaaS (Fintech VIP)" 
+                active={activeTab === 'baas'} 
+                onClick={() => handleNavClick('baas')} 
+              />
 
-          <NavItem 
-            icon={<ArrowLeftRight size={20} />} 
-            label="FX Trader" 
-            active={activeTab === 'fx-trader'} 
-            onClick={() => handleNavClick('fx-trader')} 
-          />
+              <NavItem 
+                icon={<ArrowLeftRight size={20} />} 
+                label="FX Trader" 
+                active={activeTab === 'fx-trader'} 
+                onClick={() => handleNavClick('fx-trader')} 
+              />
 
-          <NavItem 
-            icon={<PieChart size={20} />} 
-            label="Centro de Liquidez" 
-            active={activeTab === 'liquidity'} 
-            onClick={() => handleNavClick('liquidity')} 
-          />
+              <NavItem 
+                icon={<PieChart size={20} />} 
+                label="Centro de Liquidez" 
+                active={activeTab === 'liquidity'} 
+                onClick={() => handleNavClick('liquidity')} 
+              />
 
-          <NavItem 
-            icon={<TrendingUp size={20} />} 
-            label="Analítica de Spread" 
-            active={activeTab === 'analytics'} 
-            onClick={() => handleNavClick('analytics')} 
-          />
+              <NavItem 
+                icon={<TrendingUp size={20} />} 
+                label="Analítica de Spread" 
+                active={activeTab === 'analytics'} 
+                onClick={() => handleNavClick('analytics')} 
+              />
 
-          <NavItem 
-            icon={<ArrowLeftRight size={20} />} 
-            label="Transacciones" 
-            active={activeTab === 'transactions'} 
-            onClick={() => handleNavClick('transactions')} 
-          />
+              <NavItem 
+                icon={<ArrowLeftRight size={20} />} 
+                label="Transacciones" 
+                active={activeTab === 'transactions'} 
+                onClick={() => handleNavClick('transactions')} 
+              />
 
-          <NavItem 
-            icon={<Users size={20} />} 
-            label="Clientes (KYC)" 
-            active={activeTab === 'clients'} 
-            onClick={() => handleNavClick('clients')} 
-          />
+              <NavItem 
+                icon={<Users size={20} />} 
+                label="Clientes (KYC)" 
+                active={activeTab === 'clients'} 
+                onClick={() => handleNavClick('clients')} 
+              />
 
-          <NavItem 
-            icon={<Users size={20} />} 
-            label="Programa de Aliados" 
-            active={activeTab === 'allies'} 
-            onClick={() => handleNavClick('allies')} 
-          />
+              <NavItem 
+                icon={<Users size={20} />} 
+                label="Programa de Aliados" 
+                active={activeTab === 'allies'} 
+                onClick={() => handleNavClick('allies')} 
+              />
 
-          <NavItem 
-            icon={<FileText size={20} />} 
-            label="Cumplimiento (CNBV)" 
-            active={activeTab === 'compliance'} 
-            onClick={() => handleNavClick('compliance')} 
-          />
+              <NavItem 
+                icon={<FileText size={20} />} 
+                label="Cumplimiento (CNBV)" 
+                active={activeTab === 'compliance'} 
+                onClick={() => handleNavClick('compliance')} 
+              />
 
-          <NavItem 
-            icon={<Settings size={20} />} 
-            label="Configuración" 
-            active={activeTab === 'settings'} 
-            onClick={() => handleNavClick('settings')} 
-          />
+              <NavItem 
+                icon={<Settings size={20} />} 
+                label="Configuración" 
+                active={activeTab === 'settings'} 
+                onClick={() => handleNavClick('settings')} 
+              />
+            </>
+          )}
         </nav>
 
         <div className="p-4 border-t border-[#2b3139]">
-          <button onClick={logout} className="flex items-center gap-3 text-gray-400 hover:text-white transition-colors w-full p-2 rounded-lg hover:bg-[#2b3139] cursor-pointer">
+          <button onClick={logout} className="flex items-center gap-3 text-gray-400 hover:text-white transition-colors w-full p-3 rounded-xl hover:bg-[#2b3139] cursor-pointer text-sm">
             <LogOut size={20} />
             <span className="font-medium">Cerrar Sesión</span>
           </button>
@@ -180,26 +194,7 @@ export default function DashboardLayout({ children, activeTab, setActiveTab }: D
                 <span className="text-[9px] text-binance-yellow uppercase font-bold mt-1 tracking-wider">{profile?.puesto || '---'}</span>
               </div>
 
-              {/* Dropdown temporal para pruebas de Roles */}
-              <div className="absolute top-full right-0 mt-2 w-48 bg-[#1e2329] border border-white/10 rounded-xl shadow-2xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50 overflow-hidden">
-                <div className="p-2 border-b border-white/5 bg-black/20">
-                  <span className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Cambiar Operador (Test)</span>
-                </div>
-                <button 
-                  onClick={() => switchUser('user_cajero_1')}
-                  className={`w-full text-left p-3 text-xs hover:bg-white/5 transition-colors flex items-center gap-2 ${profile?.auth_user_id === 'user_cajero_1' ? 'text-binance-yellow font-bold bg-binance-yellow/5' : 'text-gray-300'}`}
-                >
-                  <div className={`w-2 h-2 rounded-full ${profile?.auth_user_id === 'user_cajero_1' ? 'bg-binance-yellow' : 'bg-gray-600'}`}></div>
-                  FREDDY (SuperAdmin)
-                </button>
-                <button 
-                  onClick={() => switchUser('user_gerente_1')}
-                  className={`w-full text-left p-3 text-xs hover:bg-white/5 transition-colors flex items-center gap-2 ${profile?.auth_user_id === 'user_gerente_1' ? 'text-binance-yellow font-bold bg-binance-yellow/5' : 'text-gray-300'}`}
-                >
-                  <div className={`w-2 h-2 rounded-full ${profile?.auth_user_id === 'user_gerente_1' ? 'bg-binance-yellow' : 'bg-gray-600'}`}></div>
-                  ADMIN_MASTER (SuperAdmin)
-                </button>
-              </div>
+
             </div>
           </div>
         </header>
@@ -219,15 +214,15 @@ function NavItem({ icon, label, active = false, onClick }: { icon: ReactNode; la
   return (
     <button 
       onClick={onClick}
-      className={`flex items-center gap-3 w-full p-3 rounded-xl transition-all ${
+      className={`flex items-center gap-3 w-full p-3 rounded-xl transition-all min-h-[48px] text-sm ${
         active 
           ? "bg-binance-yellow/10 text-binance-yellow font-medium" 
           : "text-gray-400 hover:text-white hover:bg-[#2b3139]"
       }`}
     >
       {icon}
-      <span>{label}</span>
-      {active && <div className="ml-auto w-1 h-5 bg-binance-yellow rounded-full"></div>}
+      <span className="truncate">{label}</span>
+      {active && <div className="ml-auto w-1 h-5 bg-binance-yellow rounded-full shrink-0"></div>}
     </button>
   );
 }

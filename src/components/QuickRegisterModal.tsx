@@ -1,4 +1,4 @@
-import React, { useState, useRef, FormEvent, DragEvent } from "react";
+import React, { useState, useRef, FormEvent, DragEvent, useEffect } from "react";
 import { 
   X, 
   User, 
@@ -9,7 +9,8 @@ import {
   CheckCircle2, 
   RefreshCw, 
   HelpCircle,
-  Briefcase
+  Briefcase,
+  ShieldCheck
 } from "lucide-react";
 import { motion } from "motion/react";
 
@@ -63,10 +64,77 @@ export default function QuickRegisterModal({ onClose, onSuccess }: QuickRegister
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
+  // Compliance check state
+  const [complianceCheck, setComplianceCheck] = useState<{ level: string; matches: any[] } | null>(null);
+  const [complianceLoading, setComplianceLoading] = useState(false);
+
   // Drag & drop states
   const [dragActiveId, setDragActiveId] = useState(false);
   const [dragActiveActa, setDragActiveActa] = useState(false);
   const [dragActiveDomicilio, setDragActiveDomicilio] = useState(false);
+
+  // ── COMPLIANCE EN VIVO: debounce 400ms mientras el usuario escribe el nombre ──
+  // Construye el nombre completo según el tipo de cliente y consulta OFAC/PEP/CNBV
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    const fullName = clientType === 'PHYSICAL'
+      ? `${firstName} ${lastName}`.trim()
+      : legalRepName || razonSocial;
+
+    // Mínimo 5 caracteres para evitar búsquedas vacías o de 1 letra
+    if (fullName.length < 5) {
+      setComplianceCheck(null);
+      setComplianceLoading(false);
+      return;
+    }
+
+    // Limpiar debounce anterior
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+
+    setComplianceLoading(true);
+    debounceRef.current = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/compliance/search-lists?q=${encodeURIComponent(fullName)}`);
+        if (res.ok) {
+          const json = await res.json();
+          setComplianceCheck({
+            level: json.data?.riskLevel || "VERDE",
+            matches: json.data?.matches || [],
+          });
+        }
+      } catch (err) {
+        console.error("Compliance live check error:", err);
+      } finally {
+        setComplianceLoading(false);
+      }
+    }, 400);
+
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, [firstName, lastName, legalRepName, razonSocial, clientType]);
+
+  // Compliance: verificar listas al registrar (fallback de seguridad)
+  const checkComplianceLists = async (fullName: string) => {
+    setComplianceLoading(true);
+    setComplianceCheck(null);
+    try {
+      const res = await fetch(`/api/compliance/search-lists?q=${encodeURIComponent(fullName)}`);
+      if (res.ok) {
+        const json = await res.json();
+        const level = json.data?.riskLevel || "VERDE";
+        const matches = json.data?.matches || [];
+        setComplianceCheck({ level, matches });
+        return { level, matches };
+      }
+    } catch (err) {
+      console.error("Compliance check error:", err);
+    } finally {
+      setComplianceLoading(false);
+    }
+    return { level: "VERDE", matches: [] };
+  };
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -120,6 +188,20 @@ export default function QuickRegisterModal({ onClose, onSuccess }: QuickRegister
 
     setIsSubmitting(true);
     try {
+      // ── COMPLIANCE: Verificar listas OFAC/PEP/CNBV antes de registrar ──
+      const fullName = clientType === 'PHYSICAL' 
+        ? `${firstName} ${lastName}`.trim()
+        : legalRepName || razonSocial;
+      
+      if (fullName) {
+        const { level } = await checkComplianceLists(fullName);
+        if (level === "ROJO") {
+          setErrorMsg(`⚠️ ALERTA DE COMPLIANCE: El nombre "${fullName}" coincide con listas OFAC/PEP. El registro ha sido bloqueado por seguridad. Consulte con el oficial de cumplimiento.`);
+          setIsSubmitting(false);
+          return;
+        }
+      }
+
       const formData = new FormData();
       formData.append("clientType", clientType);
       formData.append("email", email);
@@ -247,7 +329,28 @@ export default function QuickRegisterModal({ onClose, onSuccess }: QuickRegister
         </div>
 
         {/* Alerts */}
-        <div className="px-6 pt-4">
+        <div className="px-6 pt-4 space-y-3">
+          {complianceLoading && (
+            <div className="p-3 bg-binance-yellow/5 border border-binance-yellow/20 rounded-xl flex items-center gap-2 text-binance-yellow text-xs">
+              <RefreshCw size={14} className="animate-spin" />
+              <span className="font-medium">Verificando listas OFAC / PEP / CNBV...</span>
+            </div>
+          )}
+          {complianceCheck && !complianceLoading && (
+            <div className={`p-3 rounded-xl flex items-center gap-2 text-xs ${
+              complianceCheck.level === 'ROJO' 
+                ? "bg-red-500/10 border border-red-500/30 text-red-400"
+                : complianceCheck.level === 'AMARILLO'
+                ? "bg-yellow-500/10 border border-yellow-500/30 text-yellow-500"
+                : "bg-emerald-500/10 border border-emerald-500/30 text-emerald-400"
+            }`}>
+              <ShieldCheck size={14} />
+              <span className="font-bold">
+                Compliance: {complianceCheck.level === 'VERDE' ? '✅ Sin coincidencias' : complianceCheck.level === 'AMARILLO' ? '⚠️ Coincidencia parcial' : '🚫 Coincidencia en lista'}
+                {complianceCheck.matches.length > 0 && ` (${complianceCheck.matches.length} match${complianceCheck.matches.length > 1 ? 'es' : ''})`}
+              </span>
+            </div>
+          )}
           {errorMsg && (
             <div id="register-error-alert" className="p-4 bg-red-500/10 border border-red-500/30 rounded-xl flex items-start gap-3 text-red-400 text-xs animate-shake">
               <AlertCircle size={18} className="shrink-0 mt-0.5" />
@@ -664,12 +767,20 @@ export default function QuickRegisterModal({ onClose, onSuccess }: QuickRegister
             <button 
               id="submit-register-btn"
               type="submit"
-              disabled={isSubmitting}
-              className="flex-1 py-3.5 rounded-xl bg-binance-yellow text-black font-black hover:bg-yellow-500 transition-colors flex items-center justify-center gap-2 uppercase text-xs tracking-wider shadow-lg shadow-binance-yellow/10"
+              disabled={isSubmitting || complianceCheck?.level === 'ROJO'}
+              className={`flex-1 py-3.5 rounded-xl font-black transition-colors flex items-center justify-center gap-2 uppercase text-xs tracking-wider ${
+                complianceCheck?.level === 'ROJO'
+                  ? 'bg-red-500/20 text-red-500 border border-red-500/30 cursor-not-allowed'
+                  : 'bg-binance-yellow text-black hover:bg-yellow-500 shadow-lg shadow-binance-yellow/10'
+              }`}
             >
               {isSubmitting ? (
                 <>
                   <RefreshCw className="animate-spin" size={16} /> Verificando KYC y Guardando...
+                </>
+              ) : complianceCheck?.level === 'ROJO' ? (
+                <>
+                  <ShieldCheck size={16} /> BLOQUEADO POR COMPLIANCE
                 </>
               ) : (
                 "REGISTRAR CLIENTE Y VALIDAR EXPEDIENTE"

@@ -32,6 +32,7 @@ interface Commission {
   amount_usd: number;
   commission_per_usd: number;
   total_commission_mxn: number;
+  spread_mxn?: number;
   accrued_at: string;
 }
 
@@ -322,17 +323,17 @@ export default function Allies() {
                               </div>
                             </td>
                             <td className="p-4 text-right font-bold text-white">
-                              ${parseFloat(c.amount_usd).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD
+                              ${Number(c.amount_usd).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD
                             </td>
                             <td className="p-4 text-right font-mono text-emerald-400 font-bold">
                               +${(c.spread_mxn || 0).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} MXN
                             </td>
                             <td className="p-4 text-right">
                               <span className="text-white font-bold block">
-                                +${parseFloat(c.total_commission_mxn).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} MXN
+                                +${Number(c.total_commission_mxn).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} MXN
                               </span>
                               <span className="text-[10px] text-gray-500 block">
-                                ${parseFloat(c.commission_per_usd).toFixed(2)}/USD
+                                ${Number(c.commission_per_usd).toFixed(2)}/USD
                               </span>
                             </td>
                           </tr>
