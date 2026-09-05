@@ -1,0 +1,93 @@
+name: CI — SICC (audit + tests + build)
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Pipeline básico de CI/CD (Fase 5)
+# Se ejecuta en cada push a main y en cada Pull Request.
+# Corrige la recomendación prioritaria del auditor: tests en cada cambio.
+# ═══════════════════════════════════════════════════════════════════════════
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────────────
+  # 1. SEGURIDAD: escaneo de dependencias vulnerables (npm audit)
+  # ─────────────────────────────────────────────────────────────────────────
+  security:
+    name: Seguridad (npm audit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Instalar dependencias
+        run: npm ci || npm install
+
+      - name: Auditar dependencias (high/critical)
+        run: npm audit --audit-level=high
+        # Fallará el pipeline si hay vulnerabilidades HIGH o CRITICAL.
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # 2. CALIDAD: lint + tests unitarios/integración + build
+  # ─────────────────────────────────────────────────────────────────────────
+  quality:
+    name: Calidad (lint + test + build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Instalar dependencias
+        run: npm ci || npm install
+
+      - name: Lint (TypeScript)
+        run: npm run lint
+
+      - name: Tests unitarios + integración (Vitest)
+        run: npm test
+
+      - name: Build de producción
+        run: npm run build
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # 3. E2E: flujo crítico con Playwright (login → arqueo → venta → corte)
+  # ─────────────────────────────────────────────────────────────────────────
+  e2e:
+    name: E2E (Playwright)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Instalar dependencias
+        run: npm ci || npm install
+
+      - name: Instalar navegador Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Ejecutar tests E2E
+        run: npx playwright test
+
+      - name: Guardar artefactos de fallo (screenshots/traces)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: test-results/
+          retention-days: 7
