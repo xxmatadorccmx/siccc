@@ -1,0 +1,23 @@
+services:
+  app:
+    image: node:22-bookworm-slim
+    working_dir: /app
+    command: sh -c "npm install && npm run dev"
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: development
+      PORT: 3000
+      DB_PATH: /app/data/baas_platform.db
+      APP_URL: https://3000-${BASE44_PUBLIC_HOST_SUFFIX}
+      __VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS: ${__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS}
+    volumes:
+      - .:/app
+      - node_modules:/app/node_modules
+      - app_data:/app/data
+      - uploads:/app/uploads
+
+volumes:
+  node_modules:
+  app_data:
+  uploads:
