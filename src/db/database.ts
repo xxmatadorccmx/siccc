@@ -2,9 +2,16 @@ import Database from "better-sqlite3";
 import path from "path";
 import fs from "fs";
 import { createHash } from "crypto";
-
 let db: any;
-const dbPath = process.env.DB_PATH || "baas_platform.db";
+
+if (process.env.DATABASE_URL) {
+  // === PostgreSQL production mode ===
+  const pgMod: any = await import('./pg-adapter');
+  db = await pgMod.createPgAdapter();
+  pgMod.runPgSchemaSetup(db);
+} else {
+  // === SQLite development mode ===
+  const dbPath = process.env.DB_PATH || "baas_platform.db";
 
 try {
   db = new Database(dbPath);
@@ -1137,5 +1144,7 @@ try {
     }
   }
 }
+
+} // end SQLite mode
 
 export default db;
