@@ -5,17 +5,47 @@
 - VPS con Docker y Docker Compose (Hostinger VPS, DigitalOcean, AWS, etc.)
 - Un dominio apuntando a la IP del servidor (registro A en DNS)
 
-## Pasos
-
-### 1. Clonar el repositorio en el servidor
+## Despliegue rápido (automático)
 
 ```bash
-ssh usuario@tu-servidor
-git clone https://github.com/freddyizquierdo775-lang/SICC.git
-cd SICC
+ssh root@IP_DE_TU_VPS
+bash <(curl -s https://raw.githubusercontent.com/freddyizquierdo775-lang/SICC/main/deploy.sh) TU_DOMINIO.com tu@email.com
 ```
 
-### 2. Configurar variables de entorno
+O manualmente tras clonar el repo:
+
+```bash
+git clone https://github.com/freddyizquierdo775-lang/SICC.git /opt/SICC
+cd /opt/SICC
+bash deploy.sh TU_DOMINIO.com tu@email.com
+```
+
+El script hace todo automáticamente: instala Docker, clona el repo, genera contraseñas seguras, configura Nginx, levanta los servicios y obtiene el certificado SSL.
+
+## Despliegue manual (paso a paso)
+
+### 1. Preparar el VPS en Hostinger
+
+1. hPanel → VPS → crear/seleccionar VPS con Ubuntu 22.04/24.04
+2. hPanel → VPS → Firewall → abrir puertos 80, 443, 22
+3. Apuntar dominio: registro A `@` → IP del VPS
+
+### 2. Conectarse e instalar Docker
+
+```bash
+ssh root@IP_DEL_VPS
+apt update && apt upgrade -y
+curl -fsSL https://get.docker.com | sh
+```
+
+### 3. Clonar el repositorio en el servidor
+
+```bash
+git clone https://github.com/freddyizquierdo775-lang/SICC.git /opt/SICC
+cd /opt/SICC
+```
+
+### 4. Configurar variables de entorno
 
 ```bash
 cp .env.production.example .env.production
@@ -23,47 +53,40 @@ nano .env.production
 # Cambia POSTGRES_PASSWORD y JWT_SECRET por valores seguros
 ```
 
-### 3. Configurar el dominio en Nginx
+### 5. Configurar el dominio en Nginx
 
 ```bash
-nano nginx/prod.conf
-# Reemplaza TODAS las apariciones de "TU_DOMINIO.com" por tu dominio real
+sed -i 's|TU_DOMINIO.com|tu-dominio-real.com|g' nginx/prod.conf
 ```
 
-### 4. Iniciar los servicios
+### 6. Iniciar los servicios
 
 ```bash
-docker compose -f docker-compose.prod.yml --env-file .env.production up -d --build
+docker compose -f docker-compose.prod.yml --env-file .env.production up -d --build postgres app
 ```
 
-Esto levanta 4 contenedores:
+Esto levanta:
 - **postgres** — Base de datos PostgreSQL 16 (persistente)
 - **app** — Servidor Node.js (Express + frontend compilado)
-- **nginx** — Reverse proxy con SSL
-- **certbot** — Renovación automática de certificados
 
-### 5. Obtener certificado SSL (Let's Encrypt)
-
-Antes de obtener el certificado, Nginx necesita estar corriendo con el bloque HTTP (sin SSL).
-
-Crea un nginx temporal solo con HTTP:
+### 7. Obtener certificado SSL (Let's Encrypt)
 
 ```bash
-# Iniciar solo nginx con config temporal sin SSL
-docker compose -f docker-compose.prod.yml up -d nginx
+# Iniciar nginx con config HTTP
+docker compose -f docker-compose.prod.yml --env-file .env.production up -d nginx
 
 # Obtener certificado
-docker compose -f docker-compose.prod.yml run --rm certbot certonly \
+docker compose -f docker-compose.prod.yml --env-file .env.production run --rm certbot certonly \
   --webroot -w /var/www/certbot \
-  -d TU_DOMINIO.com \
+  -d TU_DOMINIO.com -d www.TU_DOMINIO.com \
   --email tu@email.com \
   --agree-tos --no-eff-email
 
 # Reiniciar nginx para cargar SSL
-docker compose -f docker-compose.prod.yml restart nginx
+docker compose -f docker-compose.prod.yml --env-file .env.production restart nginx
 ```
 
-### 6. Verificar
+### 8. Verificar
 
 ```bash
 # Health check
