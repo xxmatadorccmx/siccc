@@ -1,0 +1,32 @@
+services:
+  app:
+    image: node:22-bookworm-slim
+    working_dir: /app
+    command: sh -c "npm install && npm run dev"
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: development
+      PORT: "3000"
+      DB_PATH: /data/baas_platform.db
+      JWT_SECRET: base44_local_development_secret
+      __VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS: ${__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS:-}
+      CHOKIDAR_USEPOLLING: "true"
+    volumes:
+      - .:/app
+      - node_modules:/app/node_modules
+      - app_data:/data
+      - uploads:/app/uploads
+    init: true
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 30s
+
+volumes:
+  node_modules:
+  app_data:
+  uploads:
